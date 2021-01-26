@@ -21,6 +21,10 @@
 // Include for strerror();
 #include <string.h>
 
+
+// PSRDADA includes
+#include "ipcbuf.h"
+
 #endif
 
 // Main Defines
@@ -48,7 +52,12 @@ extern "C" {
 #endif 
 
 // Main functions
-int initialise_port(const int portNum, const long bufferSize);
+int ilt_dada_initialise_port(const int portNum, const long bufferSize);
+int ilt_dada_initialise_ringbuffer();
+ipcbuf_t* ilt_dada_initialise_ringbuffer_from_scratch(ilt_dada_config *config);
+int ilt_dada_operate(int sockfd, ipcbuf_t *ringbuffer);
+
+int ilt_dada_checkup(int sockfd);
 
 // Internal functions
 void cleanup_initialise_port(struct addrinfo *serverInfo, int sockfd_init);
