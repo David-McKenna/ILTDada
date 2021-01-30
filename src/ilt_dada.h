@@ -10,6 +10,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
+#include <sys/time.h> // struct timeval for timeout, recvmmsg has an edge case we'd like to avoid
 
 
 // Let me print stuff and see errors
@@ -51,8 +52,11 @@ typedef struct ilt_dada_config {
 	int portNum;
 	long portBufferSize;
 	int portPriority;
+	int packetSize;
 
-	// Startup options
+	// ILTDada runtime options
+	int checkInitParameters;
+	int checkInitData;
 	int checkObsParameters;
 	int checkObsData;
 
@@ -70,15 +74,26 @@ typedef struct ilt_dada_config {
 	unsigned int num_readers;
 
 
-	// PSRDADA working variables
+	// Ringbuffer working variables
 	int sockfd;
+	char headerText[DADA_DEFAULT_HEADER_SIZE];
+	long currentPacket#
 	ipcbuf_t *ringbuffer;
+	ipcbuf_t *header;
 
 } ilt_dada_config;
 extern ilt_dada_config ilt_dada_config_default;
 #endif
 
 
+
+#ifndef __ILT_DADA_INLINE_PACKETNO
+#define __ILT_DADA_INLINE_PACKETNO
+inline long beamformed_packno(unsigned int timestamp, unsigned int sequence, unsigned int clock200MHz) {
+ 	//VERBOSE(printf("Packetno: %d, %d, %d\n", timestamp, sequence, clock200MHz););
+	return ((timestamp*1000000l*(160+40*clock200MHz)+512)/1024+sequence)/16;
+}
+#endif
 
 
 // Main Prototypes
@@ -98,10 +113,13 @@ int ilt_dada_initial_checkup(ilt_dada_config *config);
 
 int ilt_dada_operate(ilt_dada_config *config);
 
+int ilt_dada_cleanup(ilt_dada_config *config);
 
 
 // Internal functions
 void cleanup_initialise_port(struct addrinfo *serverInfo, int sockfd_init);
+int ilt_data_operate_prepare_buffers();
+void ilt_dada_operate_cleanup_buffers(char *packetBuffer, struct mmsghdr *msgvec, struct iovec *iovecs)
 
 #ifdef __cplusplus
 }
