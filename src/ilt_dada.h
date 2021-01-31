@@ -23,6 +23,10 @@
 // Include for strerror();
 #include <string.h>
 
+// Include for free();
+#include <stdlib.h>
+
+
 
 // PSRDADA includes
 #include "ipcbuf.h"
@@ -34,18 +38,31 @@
 #ifndef __ILT_DADA_DEFINES_H
 #define __ILT_DADA_DEFINES_H
 
-// Time to wait between attempts at an operation that can fail
-#define SLEEPTIME
-// Verify, not sure if preambles/checksum are included asfter recv.
-#define UDP_HDR_SIZE 50
-#define ETH_PKT_CKSM 4
-#define MAX_UDP_LEN 7824
+#define MAX_UDP_LEN UDPNTIMESLICE * UDPNPOL * 122 + UDPHDRLEN
 
 #endif
 
+// If the compiler can't find this in the dada header
+#ifndef DADA_DEFAULT_HEADER_SIZE
+#define DADA_DEFAULT_HEADER_SIZE 4096
+#endif
 
-#ifndef __ILT_DADA_CONFIG_STRUCT
-#define __ILT_DADA_CONFIG_STRUCT
+
+#ifndef __ILT_DADA_STRUCTS
+#define __ILT_DADA_STRUCTS
+
+typedef struct ilt_dada_operate_params {
+	char* packetBuffer;
+	struct mmsghdr *msgvec;
+	struct iovec *iovecs;
+	struct timespec *timeout;
+	
+	long packetsSeen;
+	long packetsExpected;
+	long finalPacket;
+	long workVar;
+} ilt_dada_operate_params;
+extern ilt_dada_operate_params ilt_dada_operate_params_default;
 
 typedef struct ilt_dada_config {
 	// UDP configuration
@@ -53,16 +70,22 @@ typedef struct ilt_dada_config {
 	long portBufferSize;
 	int portPriority;
 	int packetSize;
+	float portTimeout;
+	int recvflags;
 
 	// ILTDada runtime options
 	int checkInitParameters;
 	int checkInitData;
 	int checkObsParameters;
 	int checkObsData;
+	int checkPackets;
+	int cleanupTimeout;
 
 
 	// Observation configuration
 	long startPacket;
+	long endPacket;
+	int packetsPerIteration;
 	unsigned char obsClockBit;
 	unsigned char obsBitMode;
 
@@ -77,9 +100,12 @@ typedef struct ilt_dada_config {
 	// Ringbuffer working variables
 	int sockfd;
 	char headerText[DADA_DEFAULT_HEADER_SIZE];
-	long currentPacket#
+	long currentPacket;
 	ipcbuf_t *ringbuffer;
 	ipcbuf_t *header;
+
+	// Main operation loop variables
+	ilt_dada_operate_params *params;
 
 } ilt_dada_config;
 extern ilt_dada_config ilt_dada_config_default;
@@ -89,10 +115,7 @@ extern ilt_dada_config ilt_dada_config_default;
 
 #ifndef __ILT_DADA_INLINE_PACKETNO
 #define __ILT_DADA_INLINE_PACKETNO
-inline long beamformed_packno(unsigned int timestamp, unsigned int sequence, unsigned int clock200MHz) {
- 	//VERBOSE(printf("Packetno: %d, %d, %d\n", timestamp, sequence, clock200MHz););
-	return ((timestamp*1000000l*(160+40*clock200MHz)+512)/1024+sequence)/16;
-}
+extern inline long beamformed_packno(unsigned int timestamp, unsigned int sequence, unsigned int clock200MHz);
 #endif
 
 
@@ -108,18 +131,21 @@ extern "C" {
 int ilt_dada_initialise_port(ilt_dada_config *config);
 
 ipcbuf_t* ilt_dada_initialise_ringbuffer_from_scratch(ilt_dada_config *config);
-int ilt_dada_initialise_ringbuffer(ipcbuf_t *ringbuffer, ilt_dada_config *config);
+int ilt_dada_initialise_ringbuffer(ilt_dada_config *config);
 int ilt_dada_initial_checkup(ilt_dada_config *config);
 
 int ilt_dada_operate(ilt_dada_config *config);
+int ilt_dada_operate_loop(ilt_dada_config *config);
+
+void ilt_dada_packet_comments(ilt_dada_config *config);
 
 int ilt_dada_cleanup(ilt_dada_config *config);
 
 
 // Internal functions
 void cleanup_initialise_port(struct addrinfo *serverInfo, int sockfd_init);
-int ilt_data_operate_prepare_buffers();
-void ilt_dada_operate_cleanup_buffers(char *packetBuffer, struct mmsghdr *msgvec, struct iovec *iovecs)
+int ilt_data_operate_prepare_buffers(ilt_dada_config *config);
+void ilt_dada_operate_cleanup_buffers(ilt_dada_config *config);
 
 #ifdef __cplusplus
 }
