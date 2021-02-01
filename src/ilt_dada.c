@@ -1,5 +1,11 @@
 #include "ilt_dada.h"
 
+
+// Future notes
+// https://www.kernel.org/doc/Documentation/networking/packet_mmap.txt
+// https://github.com/josephmartin09/packet_mmap/blob/master/packet_mmap.c
+
+
 ilt_dada_operate_params ilt_dada_operate_params_default = {
 	.packetBuffer = NULL,
 	.msgvec = NULL,
@@ -262,10 +268,12 @@ int ilt_dada_initialise_ringbuffer(ilt_dada_config *config) {
 	}
 
 	// Mark the data as being from beofre the true start of the observation
+	ipcbuf_lock_write(config->ringbuffer);
 	if (ipcbuf_disable_sod(config->ringbuffer) < 0) {
 		// ipcbuf_disable_sod(...) prints rttot yo stderr, so we just need to exit.
 		return -1;
 	}
+	ipcbuf_unlock_write(config->ringbuffer);
 
 
 	// This now requires root permissions; skip for the moment.
@@ -438,11 +446,13 @@ int ilt_dada_operate(ilt_dada_config *config) {
 	// We'll also return the entire buffer, rather than single out the specific sample that
 	// 		passes our target packet
 	int bufferSOD = (ipcbuf_get_write_count(config->ringbuffer) - 1) > 0 ? ipcbuf_get_write_count(config->ringbuffer) - 1 : 0;
+	ipcbuf_lock_write(config->ringbuffer);
 	if (ipcbuf_enable_sod(config->ringbuffer, bufferSOD, 0) < 0) {
 		// ipcbuf_enable_sod(...) prnts error to stderr, exit.
 		ilt_dada_operate_cleanup_buffers(config);
 		return -1;
 	}
+	ipcbuf_unlock_write(config->ringbuffer);
 
 	// Reset loop variables for main observation
 	config->params->finalPacket = config->endPacket;
@@ -458,11 +468,13 @@ int ilt_dada_operate(ilt_dada_config *config) {
 	ilt_dada_packet_comments(config);
 
 	// Mark the data as completed
+	ipcbuf_lock_write(config->ringbuffer);
 	if (ipcbuf_enable_eod(config->ringbuffer) < 0) {
 		fprintf(stderr, "ERROR: Failed to mark end of data on port %d, exiting.\n", config->portNum);
 		ilt_dada_operate_cleanup_buffers(config);
 		return -1;
 	}
+	ipcbuf_unlock_write(config->ringbuffer);
 
 	// Cleanup buffers
 	ilt_dada_operate_cleanup_buffers(config);
