@@ -1,5 +1,5 @@
 #include "ilt_dada.h"
-
+#include <limits.h>
 
 // Future notes
 // https://www.kernel.org/doc/Documentation/networking/packet_mmap.txt
@@ -16,6 +16,7 @@ ilt_dada_operate_params ilt_dada_operate_params_default = {
 	.packetsExpected = 0,
 	.finalPacket = -1,
 	.workVar = -1,
+	.firstLoop = 1
 };
 
 ilt_dada_config ilt_dada_config_default = {
@@ -24,6 +25,7 @@ ilt_dada_config ilt_dada_config_default = {
 	.portNum = -1,
 	.portBufferSize = -1,
 	.portPriority = 6,
+	.portTimeout = 30,
 	.packetSize = MAX_UDP_LEN,
 	.recvflags = 0,
 
@@ -34,11 +36,11 @@ ilt_dada_config ilt_dada_config_default = {
 	.checkObsParameters = 1,
 	.checkObsData = 1,
 	.checkPackets = 1,
-	.packetsPerIteration = 8192, // ~0.67 seconds of data
-
 
 	// Observation configuration
 	.startPacket = -1,
+	.endPacket = LONG_MAX,
+	.packetsPerIteration = 8192, // ~0.67 seconds of data
 	.obsClockBit= -1,
 	.obsBitMode = -1,
 
@@ -267,6 +269,7 @@ int ilt_dada_initialise_ringbuffer(ilt_dada_config *config) {
 		return -2;
 	}
 
+
 	// Mark the data as being from beofre the true start of the observation
 	ipcbuf_lock_write(config->ringbuffer);
 	if (ipcbuf_disable_sod(config->ringbuffer) < 0) {
@@ -301,10 +304,12 @@ int ilt_dada_initial_checkup(ilt_dada_config *config) {
 
 	// Read the first packet in the queue into the buffer
 	unsigned char buffer[MAX_UDP_LEN];
+	printf("Recv\n");
 	if (recvfrom(config->sockfd, &buffer[0], MAX_UDP_LEN, MSG_PEEK, NULL, NULL) == -1) {
 		fprintf(stderr, "ERROR: Unable to peek at first packet (errno %d, %s).", errno, strerror(errno));
 		return -2;
 	}
+	printf("Peek'd\n");
 
 	// Sanity check the components of the CEP packet header
 	lofar_source_bytes *source = (lofar_source_bytes*) &(buffer[1]);
@@ -398,13 +403,14 @@ int ilt_dada_operate(ilt_dada_config *config) {
 
 	// Initialise buffers
 	static struct timespec timeout;
-	timeout.tv_sec = (int) (config->portTimeout / 1 );
+	timeout.tv_sec = (int) config->portTimeout;
 	timeout.tv_nsec = (int) ((config->portTimeout - ((int) config->portTimeout) ) * 1e9);
 	static ilt_dada_operate_params params = { 	.msgvec = NULL, 
 												.iovecs = NULL, 
 												.timeout = &timeout, 
 												.packetsSeen = 0,
 												.packetsExpected = 0,
+												.firstLoop = 1
 											};
 	params.finalPacket = config->startPacket;
 
@@ -423,36 +429,39 @@ int ilt_dada_operate(ilt_dada_config *config) {
 	}
 
 	config->currentPacket = beamformed_packno(*((unsigned int*) &(config->params->packetBuffer[8])), *((unsigned int*) &(config->params->packetBuffer[12])), ((lofar_source_bytes*) &(config->params->packetBuffer[1]))->clockBit);
+	printf("Current packet no.: %ld\n", config->currentPacket);
 	long finalPacketOffset = (config->packetsPerIteration - 1) * config->packetSize;
 
 
 	// Build the loop parameters
 
 
-	if (config->currentPacket < config->startPacket) {
-		// Operate until the start of the observation
-		if (ilt_dada_operate_loop(config) < 0) {
-			return -1;
-		}
-
-		// Print debug information about the startup period
-		ilt_dada_packet_comments(config);
-	} else {
+	if (config->currentPacket > config->startPacket) {
 		fprintf(stderr, "WARNING: We are already past the observation start time on port %d.\n", config->portNum);
 	}
+
+	// Operate until the start of the observation, or 1 iteration to allow for data to be marked as SOD
+	if (ilt_dada_operate_loop(config) < 0) {
+		return -1;
+	}
+
+	// Print debug information about the startup period
+	ilt_dada_packet_comments(config);
+
 
 	// Mark the data as ready to be consumed
 	// Minimu mbuffer is the amount of buffers written - 1 or 0, whichever is high
 	// We'll also return the entire buffer, rather than single out the specific sample that
 	// 		passes our target packet
-	int bufferSOD = (ipcbuf_get_write_count(config->ringbuffer) - 1) > 0 ? ipcbuf_get_write_count(config->ringbuffer) - 1 : 0;
-	ipcbuf_lock_write(config->ringbuffer);
+	long unsigned int bufferSOD = ipcbuf_get_write_count(config->ringbuffer) > 0 ? ipcbuf_get_write_count(config->ringbuffer) - 1 : 0;
+	printf("SOD: %ld, %ld\n", ipcbuf_get_write_count(config->ringbuffer), bufferSOD);
+	/*
 	if (ipcbuf_enable_sod(config->ringbuffer, bufferSOD, 0) < 0) {
 		// ipcbuf_enable_sod(...) prnts error to stderr, exit.
 		ilt_dada_operate_cleanup_buffers(config);
 		return -1;
 	}
-	ipcbuf_unlock_write(config->ringbuffer);
+	*/
 
 	// Reset loop variables for main observation
 	config->params->finalPacket = config->endPacket;
@@ -490,7 +499,12 @@ int ilt_dada_operate_loop(ilt_dada_config *config) {
 	int readPackets;
 	long finalPacketOffset = (config->packetsPerIteration - 1) * config->packetSize;
 	long writeBytes, lastPacket;
-	while (config->currentPacket < params.finalPacket) {
+
+	if (ipcbuf_lock_write(config->ringbuffer) < 0) {
+		fprintf(stderr, "ERROR: Failed to lock buffer for writing on port %d\n", config->portNum);
+	}
+	while (config->currentPacket < params.finalPacket || params.firstLoop == 1) {
+		printf("Entering main loop: %ld, %ld, %d\n", config->currentPacket, params.finalPacket, params.firstLoop);
 		readPackets = recvmmsg(config->sockfd, params.msgvec, config->packetsPerIteration, config->recvflags, params.timeout);
 		
 		if (readPackets < 0) {
@@ -502,10 +516,6 @@ int ilt_dada_operate_loop(ilt_dada_config *config) {
 		}
 
 
-		bufferPointer = ipcbuf_get_next_write(config->ringbuffer);
-
-
-
 		if (config->checkPackets) {
 			for (int packetIdx = 0; packetIdx < config->packetsPerIteration; packetIdx++) {
 				// Sanity check packet contents / flags
@@ -513,13 +523,16 @@ int ilt_dada_operate_loop(ilt_dada_config *config) {
 		}
 
 
-		ipcbuf_lock_write(config->ringbuffer);
+
+		printf("%ld\n", ipcbuf_get_bufsz(config->ringbuffer));
+		bufferPointer = ipcbuf_get_next_write(config->ringbuffer);
 		
 		writeBytes = readPackets * config->packetSize;
-		memcpy(bufferPointer, params.packetBuffer, writeBytes);
+		printf("%p, %p, %ld, %ld %ld\n", bufferPointer, params.packetBuffer, readPackets, config->packetSize, writeBytes);
+		memcpy(bufferPointer, &(params.packetBuffer[0]), writeBytes);
 
 		ipcbuf_mark_filled(config->ringbuffer, writeBytes);
-		ipcbuf_unlock_write(config->ringbuffer);
+
 
 		lastPacket = beamformed_packno(*((unsigned int*) &(params.packetBuffer[finalPacketOffset + 8])), *((unsigned int*) &(params.packetBuffer[finalPacketOffset + 12])), ((lofar_source_bytes*) &(params.packetBuffer[1]))->clockBit);
 
@@ -528,8 +541,14 @@ int ilt_dada_operate_loop(ilt_dada_config *config) {
 		params.packetsExpected += lastPacket - config->currentPacket;
 
 		config->currentPacket = lastPacket;
+		params.firstLoop = 0;
 	}
 
+	if (ipcbuf_unlock_write(config->ringbuffer) < 0) {
+		fprintf(stderr, "ERROR: Failed to lock buffer for writing on port %d\n", config->portNum);
+	}
+
+	printf("Exit main loop\n");
 	return 0;
 }
 
@@ -621,13 +640,20 @@ int ilt_dada_cleanup(ilt_dada_config *config) {
 
 int main() {
 	ilt_dada_config cfg = ilt_dada_config_default;
-	cfg.portNum = 1234;
+	cfg.key = 0xdada;
+	cfg.portNum = 16130;
+	cfg.portBufferSize = 8 * 8192 * MAX_UDP_LEN,
+	cfg.bufsz = cfg.portBufferSize / 8;
+	cfg.nbufs = 32;
+	printf("Initialisng port\n");
 	if ((cfg.sockfd = ilt_dada_initialise_port(&cfg)) < 0) {
 		return -1;
 	}
-
+	printf("Initialise ringbuffer\n");
 	ilt_dada_initialise_ringbuffer_from_scratch(&cfg);
+	printf("Checkup\n");
+	ilt_dada_initial_checkup(&cfg);
+	printf("Operate\n");
 	ilt_dada_operate(&cfg);
 
-	ilt_dada_initial_checkup(&cfg);
 }

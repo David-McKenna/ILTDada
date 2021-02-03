@@ -27,6 +27,9 @@
 #include <stdlib.h>
 
 
+// lONG_MAX
+#include <limits.h>
+
 
 // PSRDADA includes
 #include "ipcbuf.h"
@@ -61,6 +64,7 @@ typedef struct ilt_dada_operate_params {
 	long packetsExpected;
 	long finalPacket;
 	long workVar;
+	int firstLoop;
 } ilt_dada_operate_params;
 extern ilt_dada_operate_params ilt_dada_operate_params_default;
 
