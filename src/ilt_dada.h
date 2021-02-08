@@ -33,6 +33,7 @@
 
 // PSRDADA includes
 #include "ipcbuf.h"
+#include "ipcio.h"
 #include <stdint.h> // For uint64_t support
 
 #endif
@@ -65,6 +66,7 @@ typedef struct ilt_dada_operate_params {
 	long finalPacket;
 	long workVar;
 	int firstLoop;
+	long bytesWritten;
 } ilt_dada_operate_params;
 extern ilt_dada_operate_params ilt_dada_operate_params_default;
 
@@ -105,8 +107,8 @@ typedef struct ilt_dada_config {
 	int sockfd;
 	char headerText[DADA_DEFAULT_HEADER_SIZE];
 	long currentPacket;
-	ipcbuf_t *ringbuffer;
-	ipcbuf_t *header;
+	ipcio_t *ringbuffer;
+	ipcio_t *header;
 
 	// Main operation loop variables
 	ilt_dada_operate_params *params;
@@ -134,7 +136,7 @@ extern "C" {
 // Main functions
 int ilt_dada_initialise_port(ilt_dada_config *config);
 
-ipcbuf_t* ilt_dada_initialise_ringbuffer_from_scratch(ilt_dada_config *config);
+ipcio_t* ilt_dada_initialise_ringbuffer_from_scratch(ilt_dada_config *config);
 int ilt_dada_initialise_ringbuffer(ilt_dada_config *config);
 int ilt_dada_initial_checkup(ilt_dada_config *config);
 

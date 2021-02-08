@@ -16,7 +16,8 @@ ilt_dada_operate_params ilt_dada_operate_params_default = {
 	.packetsExpected = 0,
 	.finalPacket = -1,
 	.workVar = -1,
-	.firstLoop = 1
+	.firstLoop = 1,
+	.bytesWritten = 0
 };
 
 ilt_dada_config ilt_dada_config_default = {
@@ -230,10 +231,10 @@ void cleanup_initialise_port(struct addrinfo *serverInfo, int sockfd_init) {
  *
  * @return     0 (success) / -1 (failure)
  */
-ipcbuf_t* ilt_dada_initialise_ringbuffer_from_scratch(ilt_dada_config *config) {
+ipcio_t* ilt_dada_initialise_ringbuffer_from_scratch(ilt_dada_config *config) {
 	// Initialise a ringbuffer struct
-	static ipcbuf_t ringbuffer = IPCBUF_INIT;
-	static ipcbuf_t header = IPCBUF_INIT;
+	static ipcio_t ringbuffer = IPCIO_INIT;
+	static ipcio_t header = IPCIO_INIT;
 
 	config->ringbuffer = &ringbuffer;
 	config->header = &header;
@@ -257,27 +258,41 @@ ipcbuf_t* ilt_dada_initialise_ringbuffer_from_scratch(ilt_dada_config *config) {
  */
 int ilt_dada_initialise_ringbuffer(ilt_dada_config *config) {
 	
-	// Create the ringbuffer instance
-	if (ipcbuf_create(config->ringbuffer, config->key, config->nbufs, config->bufsz, config->num_readers) < 0) {
-		// ipcbuf_create(...) prints error to stderr, so we just need to exit.
+	// Create  and connect to the ringbuffer instance
+	if (ipcio_create(config->ringbuffer, config->key, config->nbufs, config->bufsz, config->num_readers) < 0) {
+		// ipcio_create(...) prints error to stderr, so we just need to exit.
 		return -2;
 	}
 
-	// Create the header buffer instance
-	if (ipcbuf_create(config->header, config->key + 1, 1, DADA_DEFAULT_HEADER_SIZE, config->num_readers) < 0) {
-		// ipcbuf_create(...) prints error to stderr, so we just need to exit.
+	// Create  and connect to the header buffer instance
+	if (ipcio_create(config->header, config->key + 1, 1, DADA_DEFAULT_HEADER_SIZE, config->num_readers) < 0) {
+		// ipcio_create(...) prints error to stderr, so we just need to exit.
+		return -2;
+	}
+
+	// Open the ringbuffer instance as the primary writer
+	if (ipcio_open(config->ringbuffer, 'w') < 0) {
+		// ipcio_open(...) prints error to stderr, so we just need to exit.
+		return -2;
+	}
+
+	// Open the header buffer instance as the primary writer
+	if (ipcio_open(config->header, 'w') < 0) {
+		// ipcio_open(...) prints error to stderr, so we just need to exit.
 		return -2;
 	}
 
 
 	// Mark the data as being from beofre the true start of the observation
-	ipcbuf_lock_write(config->ringbuffer);
-	if (ipcbuf_disable_sod(config->ringbuffer) < 0) {
+	// Disable for the time being, I think ipcio doesn't mark SOD by default
+	/*
+	ipcbuf_lock_write((ipcbuf_t *) config->ringbuffer);
+	if (ipcbuf_disable_sod((ipcbuf_t *) config->ringbuffer) < 0) {
 		// ipcbuf_disable_sod(...) prints rttot yo stderr, so we just need to exit.
 		return -1;
 	}
-	ipcbuf_unlock_write(config->ringbuffer);
-
+	ipcbuf_unlock_write((ipcbuf_t *)config->ringbuffer);
+	*/
 
 	// This now requires root permissions; skip for the moment.
 	/*
@@ -410,7 +425,8 @@ int ilt_dada_operate(ilt_dada_config *config) {
 												.timeout = &timeout, 
 												.packetsSeen = 0,
 												.packetsExpected = 0,
-												.firstLoop = 1
+												.firstLoop = 1,
+												.bytesWritten = 0
 											};
 	params.finalPacket = config->startPacket;
 
@@ -436,12 +452,10 @@ int ilt_dada_operate(ilt_dada_config *config) {
 	// Build the loop parameters
 
 
+	// If we haven't passed the start of the observation, loop until we start
 	if (config->currentPacket > config->startPacket) {
 		fprintf(stderr, "WARNING: We are already past the observation start time on port %d.\n", config->portNum);
-	}
-
-	// Operate until the start of the observation, or 1 iteration to allow for data to be marked as SOD
-	if (ilt_dada_operate_loop(config) < 0) {
+	} else if (ilt_dada_operate_loop(config) < 0) {
 		return -1;
 	}
 
@@ -450,18 +464,9 @@ int ilt_dada_operate(ilt_dada_config *config) {
 
 
 	// Mark the data as ready to be consumed
-	// Minimu mbuffer is the amount of buffers written - 1 or 0, whichever is high
-	// We'll also return the entire buffer, rather than single out the specific sample that
-	// 		passes our target packet
-	long unsigned int bufferSOD = ipcbuf_get_write_count(config->ringbuffer) > 0 ? ipcbuf_get_write_count(config->ringbuffer) - 1 : 0;
-	printf("SOD: %ld, %ld\n", ipcbuf_get_write_count(config->ringbuffer), bufferSOD);
-	/*
-	if (ipcbuf_enable_sod(config->ringbuffer, bufferSOD, 0) < 0) {
-		// ipcbuf_enable_sod(...) prnts error to stderr, exit.
-		ilt_dada_operate_cleanup_buffers(config);
+	if (ipcio_start(config->ringbuffer, config->params->bytesWritten) < 0) {
 		return -1;
 	}
-	*/
 
 	// Reset loop variables for main observation
 	config->params->finalPacket = config->endPacket;
@@ -470,6 +475,7 @@ int ilt_dada_operate(ilt_dada_config *config) {
 
 	// Read new data from the until the observation ends
 	if (ilt_dada_operate_loop(config) < 0) {
+		ilt_dada_operate_cleanup_buffers(config);
 		return -1;
 	}
 
@@ -477,13 +483,11 @@ int ilt_dada_operate(ilt_dada_config *config) {
 	ilt_dada_packet_comments(config);
 
 	// Mark the data as completed
-	ipcbuf_lock_write(config->ringbuffer);
-	if (ipcbuf_enable_eod(config->ringbuffer) < 0) {
+	if (ipcio_stop(config->ringbuffer) < 0) {
 		fprintf(stderr, "ERROR: Failed to mark end of data on port %d, exiting.\n", config->portNum);
 		ilt_dada_operate_cleanup_buffers(config);
 		return -1;
 	}
-	ipcbuf_unlock_write(config->ringbuffer);
 
 	// Cleanup buffers
 	ilt_dada_operate_cleanup_buffers(config);
@@ -493,19 +497,16 @@ int ilt_dada_operate(ilt_dada_config *config) {
 }
 
 int ilt_dada_operate_loop(ilt_dada_config *config) {
-	ilt_dada_operate_params params = *(config->params);
-
 	char *bufferPointer;
 	int readPackets;
 	long finalPacketOffset = (config->packetsPerIteration - 1) * config->packetSize;
-	long writeBytes, lastPacket;
+	long lastPacket;
+	size_t writeBytes, writtenBytes;
 
-	if (ipcbuf_lock_write(config->ringbuffer) < 0) {
-		fprintf(stderr, "ERROR: Failed to lock buffer for writing on port %d\n", config->portNum);
-	}
-	while (config->currentPacket < params.finalPacket || params.firstLoop == 1) {
-		printf("Entering main loop: %ld, %ld, %d\n", config->currentPacket, params.finalPacket, params.firstLoop);
-		readPackets = recvmmsg(config->sockfd, params.msgvec, config->packetsPerIteration, config->recvflags, params.timeout);
+
+	while (config->currentPacket < config->params->finalPacket || config->params->firstLoop == 1) {
+		printf("Entering main loop: %ld, %ld, %d\n", config->currentPacket, config->params->finalPacket, config->params->firstLoop);
+		readPackets = recvmmsg(config->sockfd, config->params->msgvec, config->packetsPerIteration, config->recvflags, config->params->timeout);
 		
 		if (readPackets < 0) {
 			fprintf(stderr, "ERROR: recvmmsg on port %d (errno %d: %s)\n", config->portNum, errno, strerror(errno));
@@ -522,30 +523,25 @@ int ilt_dada_operate_loop(ilt_dada_config *config) {
 			}
 		}
 
-
-
-		printf("%ld\n", ipcbuf_get_bufsz(config->ringbuffer));
-		bufferPointer = ipcbuf_get_next_write(config->ringbuffer);
-		
+	
 		writeBytes = readPackets * config->packetSize;
-		printf("%p, %p, %ld, %ld %ld\n", bufferPointer, params.packetBuffer, readPackets, config->packetSize, writeBytes);
-		memcpy(bufferPointer, &(params.packetBuffer[0]), writeBytes);
+		writtenBytes = ipcio_write(config->ringbuffer, &(config->params->packetBuffer[0]), writeBytes);
+		printf("%p, %p, %d, %d %ld\n", bufferPointer, config->params->packetBuffer, readPackets, config->packetSize, writeBytes);
 
-		ipcbuf_mark_filled(config->ringbuffer, writeBytes);
+		if (writtenBytes != writeBytes) {
+			fprintf(stderr, "WARNING Port %d: Tried to write %ld bytes to buffer but only wrote %ld.\n", config->portNum, writeBytes, writtenBytes);
+		}
+		config->params->bytesWritten += writtenBytes;
 
 
-		lastPacket = beamformed_packno(*((unsigned int*) &(params.packetBuffer[finalPacketOffset + 8])), *((unsigned int*) &(params.packetBuffer[finalPacketOffset + 12])), ((lofar_source_bytes*) &(params.packetBuffer[1]))->clockBit);
+		lastPacket = beamformed_packno(*((unsigned int*) &(config->params->packetBuffer[finalPacketOffset + 8])), *((unsigned int*) &(config->params->packetBuffer[finalPacketOffset + 12])), ((lofar_source_bytes*) &(config->params->packetBuffer[1]))->clockBit);
 
 		// Calcualte packet loss / misses / etc.
-		params.packetsSeen += readPackets;
-		params.packetsExpected += lastPacket - config->currentPacket;
+		config->params->packetsSeen += readPackets;
+		config->params->packetsExpected += lastPacket - config->currentPacket;
 
 		config->currentPacket = lastPacket;
-		params.firstLoop = 0;
-	}
-
-	if (ipcbuf_unlock_write(config->ringbuffer) < 0) {
-		fprintf(stderr, "ERROR: Failed to lock buffer for writing on port %d\n", config->portNum);
+		config->params->firstLoop = 0;
 	}
 
 	printf("Exit main loop\n");
@@ -627,24 +623,32 @@ int ilt_dada_cleanup(ilt_dada_config *config) {
 	// Wait for readers to finish up and exit, or timeout
 	float totalSleep = 0.0;
 	while (totalSleep < config->cleanupTimeout) {
-		if (ipcbuf_get_reader_conn(config->ringbuffer) == 0) {
+		if (ipcbuf_get_reader_conn((ipcbuf_t *) config->ringbuffer) == 0) {
 			break;
 		}
 
 		sleep(0.1);
 	}
 
-	ipcbuf_destroy(config->ringbuffer);
-	ipcbuf_destroy(config->header);
+	// Close, disconnect and destroy the ringbuffer
+	ipcio_close(config->ringbuffer);
+	ipcio_close(config->header);
+
+	ipcio_disconnect(config->ringbuffer);
+	ipcio_disconnect(config->header);
+
+	ipcio_destroy(config->ringbuffer);
+	ipcio_destroy(config->header);
 }
 
 int main() {
 	ilt_dada_config cfg = ilt_dada_config_default;
-	cfg.key = 0xdada;
+	cfg.key = 16130;
 	cfg.portNum = 16130;
 	cfg.portBufferSize = 8 * 8192 * MAX_UDP_LEN,
 	cfg.bufsz = cfg.portBufferSize / 8;
 	cfg.nbufs = 32;
+	cfg.packetsPerIteration = 8192;
 	printf("Initialisng port\n");
 	if ((cfg.sockfd = ilt_dada_initialise_port(&cfg)) < 0) {
 		return -1;
