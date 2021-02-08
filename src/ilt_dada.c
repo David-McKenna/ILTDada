@@ -233,9 +233,10 @@ void cleanup_initialise_port(struct addrinfo *serverInfo, int sockfd_init) {
  */
 ipcio_t* ilt_dada_initialise_ringbuffer_from_scratch(ilt_dada_config *config) {
 	// Initialise a ringbuffer struct
-	static ipcio_t ringbuffer = IPCIO_INIT;
-	static ipcio_t header = IPCIO_INIT;
-
+	static ipcio_t ringbuffer;
+	static ipcio_t header;
+	ringbuffer = IPCIO_INIT;
+	header = IPCIO_INIT;
 	config->ringbuffer = &ringbuffer;
 	config->header = &header;
 
