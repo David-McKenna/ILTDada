@@ -41,7 +41,7 @@ ilt_dada_config ilt_dada_config_default = {
 	// Observation configuration
 	.startPacket = -1,
 	.endPacket = LONG_MAX,
-	.packetsPerIteration = 8192, // ~0.67 seconds of data
+	.packetsPerIteration = 256, // ~0.67 seconds of data
 	.obsClockBit= -1,
 	.obsBitMode = -1,
 
@@ -272,13 +272,13 @@ int ilt_dada_initialise_ringbuffer(ilt_dada_config *config) {
 	}
 
 	// Open the ringbuffer instance as the primary writer
-	if (ipcio_open(config->ringbuffer, 'w') < 0) {
+	if (ipcio_open(config->ringbuffer, 'W') < 0) {
 		// ipcio_open(...) prints error to stderr, so we just need to exit.
 		return -2;
 	}
 
 	// Open the header buffer instance as the primary writer
-	if (ipcio_open(config->header, 'w') < 0) {
+	if (ipcio_open(config->header, 'W') < 0) {
 		// ipcio_open(...) prints error to stderr, so we just need to exit.
 		return -2;
 	}
@@ -465,9 +465,9 @@ int ilt_dada_operate(ilt_dada_config *config) {
 
 
 	// Mark the data as ready to be consumed
-	if (ipcio_start(config->ringbuffer, config->params->bytesWritten) < 0) {
-		return -1;
-	}
+//	if (ipcio_start(config->ringbuffer, config->params->bytesWritten) < 0) {
+//		return -1;
+//	}
 
 	// Reset loop variables for main observation
 	config->params->finalPacket = config->endPacket;
@@ -529,6 +529,9 @@ int ilt_dada_operate_loop(ilt_dada_config *config) {
 		writtenBytes = ipcio_write(config->ringbuffer, &(config->params->packetBuffer[0]), writeBytes);
 		printf("%p, %p, %d, %d %ld\n", bufferPointer, config->params->packetBuffer, readPackets, config->packetSize, writeBytes);
 
+		long llast = beamformed_packno(*((unsigned int*) &(config->params->packetBuffer[8])), *((unsigned int*) &(config->params->packetBuffer[12])), ((lofar_source_bytes*) &(config->params->packetBuffer[1]))->clockBit);
+		long flast = beamformed_packno(*((unsigned int*) &(config->params->packetBuffer[finalPacketOffset + 8])), *((unsigned int*) &(config->params->packetBuffer[finalPacketOffset + 12])), ((lofar_source_bytes*) &(config->params->packetBuffer[1]))->clockBit);
+		printf("%ld, %ld, %ld\n", llast, flast, flast - llast);
 		if (writtenBytes != writeBytes) {
 			fprintf(stderr, "WARNING Port %d: Tried to write %ld bytes to buffer but only wrote %ld.\n", config->portNum, writeBytes, writtenBytes);
 		}
@@ -649,7 +652,7 @@ int main() {
 	cfg.portBufferSize = 8 * 8192 * MAX_UDP_LEN,
 	cfg.bufsz = cfg.portBufferSize / 8;
 	cfg.nbufs = 32;
-	cfg.packetsPerIteration = 8192;
+	cfg.packetsPerIteration = 64;
 	printf("Initialisng port\n");
 	if ((cfg.sockfd = ilt_dada_initialise_port(&cfg)) < 0) {
 		return -1;
