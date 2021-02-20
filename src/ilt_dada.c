@@ -151,6 +151,7 @@ int ilt_dada_initialise_port(ilt_dada_config *config) {
 		return -1;
 	}
 
+	printf("Buffer: %ld, %ld, %ldMB\n", optVal, optVal<<20, config->portBufferSize);
 	if (optVal < (2 * config->portBufferSize - 1)) {	
 		if (setsockopt(sockfd_init, SOL_SOCKET, SO_RCVBUF, &(config->portBufferSize), sizeof(config->portBufferSize)) == -1) {
 			fprintf(stderr, "ERROR: Failed to adjust buffer size on port %d (errno%d: %s).\n", config->portNum, errno, strerror(errno));
@@ -175,6 +176,13 @@ int ilt_dada_initialise_port(ilt_dada_config *config) {
 			return -1;
 		}
 	}
+
+	if (getsockopt(sockfd_init, SOL_SOCKET, SO_RCVBUF, &optVal, &optLen) == -1) {
+		fprintf(stderr, "ERROR: Failed to get buffer size on port %d (errno%d: %s).\n", config->portNum, errno, strerror(errno));
+		cleanup_initialise_port(serverInfo, sockfd_init);
+		return -1;
+	}
+	printf("Buffer: %ld, %ldMB\n", optVal, optVal<<20);
 
 
 	// Without root permisisons we can increase the port priority up to 6 
@@ -208,13 +216,14 @@ int ilt_dada_initialise_port(ilt_dada_config *config) {
 	// 	trust recvmmsg here due to a known bug where the N_packs - 1 packet may block
 	// 	infinitely if it is never recieved
 	// 	https://man7.org/linux/man-pages/man2/recvmmsg.2.html#bugs 
-	// 	I wasn't able to confirm that this actually worked, but leaving it in for now.
-	const struct timeval timeout =  { .tv_sec = (int) (config->portTimeout / 1 ), .tv_usec = (int) ((config->portTimeout - ((int) config->portTimeout)) * 1e6) };
-	if (setsockopt(sockfd_init, SOL_SOCKET, SO_REUSEADDR, &timeout, sizeof(timeout)) == -1) {
-		fprintf(stderr, "ERROR: Failed to set timeout on port %d (errno%d: %s).\n", config->portNum, errno, strerror(errno));
-		cleanup_initialise_port(serverInfo, sockfd_init);
-		return -1;
-	}
+	// 	I wasn't able to confirm that this actually worked, and ran into other issues with timeouts
+	// 	so this is comments out for now.
+	//const struct timeval timeout =  { .tv_sec = (int) (config->portTimeout / 1 ), .tv_usec = (int) ((config->portTimeout - ((int) config->portTimeout)) * 1e6) };
+	//if (setsockopt(sockfd_init, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) == -1) {
+	//	fprintf(stderr, "ERROR: Failed to set timeout on port %d (errno%d: %s).\n", config->portNum, errno, strerror(errno));
+	//	cleanup_initialise_port(serverInfo, sockfd_init);
+	//	return -1;
+	//}
 
 	// Cleanup the addrinfo linked list before returning
 	cleanup_initialise_port(serverInfo, -1);
@@ -484,12 +493,12 @@ int ilt_dada_check_network(ilt_dada_config *config) {
 int ilt_dada_operate(ilt_dada_config *config) {
 
 	// Initialise buffers
-	static struct timespec timeout;
-	timeout.tv_sec = (int) config->portTimeout;
-	timeout.tv_nsec = (int) ((config->portTimeout - ((int) config->portTimeout) ) * 1e9);
+	//static struct timespec timeout;
+	//timeout.tv_sec = (int) config->portTimeout;
+	//timeout.tv_nsec = (int) ((config->portTimeout - ((int) config->portTimeout) ) * 1e9);
 	static ilt_dada_operate_params params = { 	.msgvec = NULL, 
 												.iovecs = NULL, 
-												.timeout = &timeout, 
+												.timeout = NULL, 
 												.packetsSeen = 0,
 												.packetsExpected = 0,
 												.firstLoop = 1,
@@ -718,8 +727,8 @@ int main() {
 	cfg.portNum = 16130;
 	cfg.portBufferSize = 8 * 8192 * MAX_UDP_LEN,
 	cfg.bufsz = cfg.portBufferSize / 8;
-	cfg.nbufs = 32;
-	cfg.packetsPerIteration = 64;
+	cfg.nbufs = 16;
+	cfg.packetsPerIteration = 8192;
 	printf("Initialisng port\n");
 	if ((cfg.sockfd = ilt_dada_initialise_port(&cfg)) < 0) {
 		return -1;
