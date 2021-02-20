@@ -32,8 +32,8 @@
 
 
 // PSRDADA includes
-#include "ipcbuf.h"
 #include "ipcio.h"
+#include "multilog.h"
 #include <stdint.h> // For uint64_t support
 
 #endif
@@ -101,6 +101,8 @@ typedef struct ilt_dada_config {
 	uint64_t nbufs;
 	uint64_t bufsz;
 	unsigned int num_readers;
+	char syslog;
+	char programName[64];
 
 
 	// Ringbuffer working variables
@@ -109,6 +111,7 @@ typedef struct ilt_dada_config {
 	long currentPacket;
 	ipcio_t *ringbuffer;
 	ipcio_t *header;
+	multilog_t *multilog;
 
 	// Main operation loop variables
 	ilt_dada_operate_params *params;
@@ -135,23 +138,24 @@ extern "C" {
 
 // Main functions
 int ilt_dada_initialise_port(ilt_dada_config *config);
-
-ipcio_t* ilt_dada_initialise_ringbuffer_from_scratch(ilt_dada_config *config);
 int ilt_dada_initialise_ringbuffer(ilt_dada_config *config);
-int ilt_dada_initial_checkup(ilt_dada_config *config);
+int ilt_dada_cleanup(ilt_dada_config *config);
+
+
+int ilt_dada_check_config(ilt_dada_config *config);
+int ilt_dada_check_network(ilt_dada_config *config);
 
 int ilt_dada_operate(ilt_dada_config *config);
 int ilt_dada_operate_loop(ilt_dada_config *config);
-
 void ilt_dada_packet_comments(ilt_dada_config *config);
 
-int ilt_dada_cleanup(ilt_dada_config *config);
 
 
 // Internal functions
 void cleanup_initialise_port(struct addrinfo *serverInfo, int sockfd_init);
-int ilt_data_operate_prepare_buffers(ilt_dada_config *config);
-void ilt_dada_operate_cleanup_buffers(ilt_dada_config *config);
+int ilt_dada_initialise_ringbuffer_hdu(ilt_dada_config *config);
+int ilt_data_operate_prepare(ilt_dada_config *config);
+void ilt_dada_operate_cleanup(ilt_dada_config *config);
 
 #ifdef __cplusplus
 }
