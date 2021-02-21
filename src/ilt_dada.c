@@ -15,7 +15,6 @@ ilt_dada_operate_params ilt_dada_operate_params_default = {
 	.packetsSeen = 0,
 	.packetsExpected = 0,
 	.finalPacket = -1,
-	.workVar = -1,
 	.firstLoop = 1,
 	.bytesWritten = 0
 };
@@ -176,13 +175,6 @@ int ilt_dada_initialise_port(ilt_dada_config *config) {
 			return -1;
 		}
 	}
-
-	if (getsockopt(sockfd_init, SOL_SOCKET, SO_RCVBUF, &optVal, &optLen) == -1) {
-		fprintf(stderr, "ERROR: Failed to get buffer size on port %d (errno%d: %s).\n", config->portNum, errno, strerror(errno));
-		cleanup_initialise_port(serverInfo, sockfd_init);
-		return -1;
-	}
-	printf("Buffer: %ld, %ldMB\n", optVal, optVal<<20);
 
 
 	// Without root permisisons we can increase the port priority up to 6 

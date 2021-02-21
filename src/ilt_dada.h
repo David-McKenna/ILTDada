@@ -56,7 +56,7 @@
 #define __ILT_DADA_STRUCTS
 
 typedef struct ilt_dada_operate_params {
-	char* packetBuffer;
+	char *packetBuffer;
 	struct mmsghdr *msgvec;
 	struct iovec *iovecs;
 	struct timespec *timeout;
@@ -64,7 +64,6 @@ typedef struct ilt_dada_operate_params {
 	long packetsSeen;
 	long packetsExpected;
 	long finalPacket;
-	long workVar;
 	int firstLoop;
 	long bytesWritten;
 } ilt_dada_operate_params;
