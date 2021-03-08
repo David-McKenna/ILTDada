@@ -484,7 +484,7 @@ int ilt_dada_check_network(ilt_dada_config *config) {
 
 int ilt_dada_operate(ilt_dada_config *config) {
 
-	// Initialise buffers
+	// Timeout apparently is relative to the socket being oepned, so it's useless.
 	//static struct timespec timeout;
 	//timeout.tv_sec = (int) config->portTimeout;
 	//timeout.tv_nsec = (int) ((config->portTimeout - ((int) config->portTimeout) ) * 1e9);
@@ -705,30 +705,7 @@ int ilt_dada_cleanup(ilt_dada_config *config) {
 	// Close, disconnect and destroy the ringbuffer
 	ipcio_close(config->ringbuffer);
 	ipcio_close(config->header);
-	
+
 	ipcio_destroy(config->ringbuffer);
 	ipcio_destroy(config->header);
-}
-
-int main() {
-	ilt_dada_config cfg = ilt_dada_config_default;
-	cfg.key = 16130;
-	cfg.portNum = 16130;
-	cfg.portBufferSize = 8 * 8192 * MAX_UDP_LEN,
-	cfg.bufsz = cfg.portBufferSize / 8;
-	cfg.nbufs = 16;
-	cfg.packetsPerIteration = 8192;
-	printf("Initialisng port\n");
-	if ((cfg.sockfd = ilt_dada_initialise_port(&cfg)) < 0) {
-		return -1;
-	}
-	printf("Initialise ringbuffer\n");
-	ilt_dada_initialise_ringbuffer(&cfg);
-	printf("Checkup\n");
-	ilt_dada_check_network(&cfg);
-	printf("Operate\n");
-	ilt_dada_operate(&cfg);
-	printf("Cleanup");
-	ilt_dada_cleanup(&cfg);
-
 }

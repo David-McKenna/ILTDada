@@ -13,8 +13,6 @@
 #ifndef __ILT_DADA_CLI_DEFINES_H
 #define __ILT_DADA_CLI_DEFINES_H
 
-#define PACKET_DURATION_200 0.00008192
-#define PACKeT_DURATION_160 0.0001024
 
 #endif
 
@@ -28,7 +26,6 @@ extern "C" {
 #endif 
 
 int main(int argc, char  *argv[]);
-int get_packet_rate(int clock_200);
 
 #ifdef __cplusplus
 }
