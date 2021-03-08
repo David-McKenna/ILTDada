@@ -705,10 +705,7 @@ int ilt_dada_cleanup(ilt_dada_config *config) {
 	// Close, disconnect and destroy the ringbuffer
 	ipcio_close(config->ringbuffer);
 	ipcio_close(config->header);
-
-	ipcio_disconnect(config->ringbuffer);
-	ipcio_disconnect(config->header);
-
+	
 	ipcio_destroy(config->ringbuffer);
 	ipcio_destroy(config->header);
 }
