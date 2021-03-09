@@ -54,7 +54,7 @@ int main(int argc, char  *argv[]) {
 				break;
 
 			case 't':
-				cfg.finalPacket = atoi(optarg) / 12207;
+				cfg.endPacket = atoi(optarg) / 12207;
 				break;
 
 			default:
