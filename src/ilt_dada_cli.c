@@ -17,7 +17,7 @@ int main(int argc, char  *argv[]) {
 	char inputOpt;
 	int targetSeconds = 0;
 
-	while ((inputOpt = getopt(argc, argv, "p:k:n:b:s:")) != -1) {
+	while ((inputOpt = getopt(argc, argv, "p:k:n:b:s:t:")) != -1) {
 		switch (inputOpt) {
 
 			case 'p':
@@ -51,6 +51,10 @@ int main(int argc, char  *argv[]) {
 				}
 
 				cfg.nbufs = (int) ((float) atoi(optarg) / ((float) cfg.packetsPerIteration / (float) 12207));
+				break;
+
+			case 't':
+				cfg.finalPacket = atoi(optarg) / 12207;
 				break;
 
 			default:

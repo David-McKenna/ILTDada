@@ -521,6 +521,9 @@ int ilt_dada_operate(ilt_dada_config *config) {
 	long finalPacketOffset = (config->packetsPerIteration - 1) * config->packetSize;
 	config->params->finalPacket = config->startPacket;
 
+	// TEMP
+	config->finalPacket += config->startPacket;
+
 
 
 
