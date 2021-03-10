@@ -54,7 +54,7 @@ int main(int argc, char  *argv[]) {
 				break;
 
 			case 't':
-				cfg.endPacket = atoi(optarg) / 12207;
+				cfg.endPacket = atoi(optarg) * 12207;
 				break;
 
 			default:
@@ -64,7 +64,7 @@ int main(int argc, char  *argv[]) {
 	}
 
 	printf("Preparing ILTDada to record data from port %d, consuming %d packets per iteration.\n", cfg.portNum, cfg.packetsPerIteration);
-	printf("Ring buffer will require %ld MB (%ld GB) of memory to hold ~%ld seconds of data.\n", cfg.bufsz * cfg.nbufs >> 20, cfg.bufsz * cfg.nbufs >> 30, cfg.packetsPerIteration * cfg.nbufs / 12207);
+	printf("Ring buffer on key  %d (ptr %x) will require %ld MB (%ld GB) of memory to hold ~%ld seconds of data.\n", cfg.key, cfg.key, cfg.bufsz * cfg.nbufs >> 20, cfg.bufsz * cfg.nbufs >> 30, cfg.packetsPerIteration * cfg.nbufs / 12207);
 
 	printf("\n\nInitialising UDP port...\n");
 	if ((cfg.sockfd = ilt_dada_initialise_port(&cfg)) < 0) {
