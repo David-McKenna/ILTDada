@@ -15,9 +15,10 @@ int main(int argc, char  *argv[]) {
 
 
 	char inputOpt;
-	int targetSeconds = 0;
+	int bufferMul = 64;
+	float targetSeconds = 0.0;
 
-	while ((inputOpt = getopt(argc, argv, "p:k:n:b:s:t:")) != -1) {
+	while ((inputOpt = getopt(argc, argv, "p:k:n:m:s:t:r:")) != -1) {
 		switch (inputOpt) {
 
 			case 'p':
@@ -31,30 +32,22 @@ int main(int argc, char  *argv[]) {
 			case 'n':
 				cfg.packetsPerIteration = atoi(optarg);
 				cfg.portBufferSize = 8 * cfg.packetsPerIteration * MAX_UDP_LEN;
-				cfg.bufsz = cfg.packetsPerIteration * MAX_UDP_LEN;
 				break;
 
-			case 'b':
-				if (targetSeconds == 1) {
-					fprintf(stderr, "ERROR: Number of buffers is controlled by the number of seconds set when using -s, ignoring -b input.\n");
-					break;
-				}
-
-				targetSeconds = -1;
-				cfg.nbufs = atoi(optarg);
+			case 'm':
+				bufferMul = atoi(optarg);
 				break;
 
 			case 's':
-				if (targetSeconds == -1) {
-					fprintf(stderr, "ERROR: Number of buffers is controlled by the number of buffers set when using -b, ignoring -s input.\n");
-					break;
-				}
-
-				cfg.nbufs = (int) ((float) atoi(optarg) / ((float) cfg.packetsPerIteration / (float) 12207));
+				targetSeconds = atof(optarg);
 				break;
 
 			case 't':
 				cfg.endPacket = atoi(optarg) * 12207;
+				break;
+
+			case 'r':
+				cfg.num_readers = atoi(optarg);
 				break;
 
 			default:
@@ -63,8 +56,18 @@ int main(int argc, char  *argv[]) {
 		}
 	}
 
+	cfg.bufsz = bufferMul * cfg.packetsPerIteration * MAX_UDP_LEN;
+	
+
+	if (((float) cfg.bufsz / MAX_UDP_LEN) / (float) 12207 > targetSeconds) {
+		fprintf(stderr, "ERROR: Requested time is less than the size of a single buffer(%f vs %f); increase -s or decrease -m, exiting.\n", ((float) cfg.bufsz / MAX_UDP_LEN) / (float) 12207, targetSeconds);
+		return 1;
+	}
+	cfg.nbufs = targetSeconds * 12207 / cfg.packetsPerIteration / bufferMul;
+
+
 	printf("Preparing ILTDada to record data from port %d, consuming %d packets per iteration.\n", cfg.portNum, cfg.packetsPerIteration);
-	printf("Ring buffer on key  %d (ptr %x) will require %ld MB (%ld GB) of memory to hold ~%ld seconds of data.\n", cfg.key, cfg.key, cfg.bufsz * cfg.nbufs >> 20, cfg.bufsz * cfg.nbufs >> 30, cfg.packetsPerIteration * cfg.nbufs / 12207);
+	printf("Ring buffer on key  %d (ptr %x) will require %ld MB (%ld GB) of memory to hold ~%ld seconds of data in %" PRIu64 " buffers.\n", cfg.key, cfg.key, cfg.bufsz * cfg.nbufs >> 20, cfg.bufsz * cfg.nbufs >> 30, cfg.packetsPerIteration * cfg.nbufs / 12207, cfg.nbufs);
 
 	printf("\n\nInitialising UDP port...\n");
 	if ((cfg.sockfd = ilt_dada_initialise_port(&cfg)) < 0) {
