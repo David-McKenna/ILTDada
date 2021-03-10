@@ -59,7 +59,7 @@ int main(int argc, char  *argv[]) {
 	cfg.bufsz = bufferMul * cfg.packetsPerIteration * MAX_UDP_LEN;
 	
 
-	if (((float) cfg.bufsz / MAX_UDP_LEN) / (float) 12207 > targetSeconds) {
+	if (((float) bufferMul * cfg.packetsPerIteration) / (float) 12207 > targetSeconds) {
 		fprintf(stderr, "ERROR: Requested time is less than the size of a single buffer(%f vs %f); increase -s or decrease -m, exiting.\n", ((float) cfg.bufsz / MAX_UDP_LEN) / (float) 12207, targetSeconds);
 		return 1;
 	}

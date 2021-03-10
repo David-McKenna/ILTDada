@@ -522,7 +522,7 @@ int ilt_dada_operate(ilt_dada_config *config) {
 	config->params->finalPacket = config->startPacket;
 
 	// TEMP
-	config->endPacket += config->startPacket;
+	config->endPacket += config->currentPacket;
 
 
 
