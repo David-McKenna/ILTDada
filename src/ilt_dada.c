@@ -1,10 +1,6 @@
 #include "ilt_dada.h"
 #include <limits.h>
 
-// Future notes
-// https://www.kernel.org/doc/Documentation/networking/packet_mmap.txt
-// https://github.com/josephmartin09/packet_mmap/blob/master/packet_mmap.c
-
 
 ilt_dada_operate_params ilt_dada_operate_params_default = {
 	.packetBuffer = NULL,
@@ -22,6 +18,7 @@ ilt_dada_operate_params ilt_dada_operate_params_default = {
 ilt_dada_config ilt_dada_config_default = {
 
 	// UDP configuration
+	.hostname = NULL,
 	.portNum = -1,
 	.portBufferSize = -1,
 	.portPriority = 6,
@@ -108,7 +105,7 @@ int ilt_dada_initialise_port(ilt_dada_config *config) {
 	int status;
 
 	// Populate the remaining parts of addressInfo
-	if ((status = getaddrinfo(NULL, portNumStr, &addressInfo, &serverInfo)) < 0) {
+	if ((status = getaddrinfo(config->hostname, portNumStr, &addressInfo, &serverInfo)) < 0) {
 		fprintf(stderr, "ERROR: Failed to get address info on port %d (errno %d: %s).", config->portNum, status, gai_strerror(status));
 		return -1;
 	}
@@ -219,8 +216,9 @@ int ilt_dada_initialise_port(ilt_dada_config *config) {
 
 	// Cleanup the addrinfo linked list before returning
 	cleanup_initialise_port(serverInfo, -1);
-	// Return the socket fd
-	return sockfd_init;
+	// Return the socket fd and exit
+	config->sockfd = sockfd_init;
+	return 0;
 }
 
 /**
@@ -475,6 +473,13 @@ int ilt_dada_check_network(ilt_dada_config *config) {
 		}
 	}
 
+	config->obsClockBit = source->clockBit;
+	config->obsBitMode = source->bitMode;
+	// 16 + (61,122,244) * 16 * 4 / (0.5 1, 2)
+	// Max == 7824
+	config->packetSize = (int) (UDPHDRLEN + buffer[6] * buffer[7] * ((float) UDPNPOL / (source->bitMode ? source->bitMode : 0.5)));
+
+
 	config->currentPacket = beamformed_packno(*((unsigned int*) &(buffer[8])), *((unsigned int*) &(buffer[12])), source->clockBit); 
 
 	return 0;
@@ -698,7 +703,7 @@ int ilt_dada_cleanup(ilt_dada_config *config) {
 	// Wait for readers to finish up and exit, or timeout
 	float totalSleep = 0.0;
 	while (totalSleep < config->cleanupTimeout) {
-		if (ipcbuf_get_reader_conn((ipcbuf_t *) config->ringbuffer) == 0) {
+		if (ipcbuf_get_reader_conn((ipcbuf_t *) config->ringbuffer) != 0) {
 			break;
 		}
 

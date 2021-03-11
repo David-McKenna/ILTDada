@@ -70,19 +70,19 @@ int main(int argc, char  *argv[]) {
 	printf("Ring buffer on key  %d (ptr %x) will require %ld MB (%ld GB) of memory to hold ~%ld seconds of data in %" PRIu64 " buffers.\n", cfg.key, cfg.key, cfg.bufsz * cfg.nbufs >> 20, cfg.bufsz * cfg.nbufs >> 30, cfg.packetsPerIteration * cfg.nbufs / 12207, cfg.nbufs);
 
 	printf("\n\nInitialising UDP port...\n");
-	if ((cfg.sockfd = ilt_dada_initialise_port(&cfg)) < 0) {
-		printf("Exiting.\n");
-		return 1;
-	}
-
-	printf("Initialisng ringbuffer...\n");
-	if (ilt_dada_initialise_ringbuffer(&cfg) < 0) {
+	if (ilt_dada_initialise_port(&cfg) < 0) {
 		printf("Exiting.\n");
 		return 1;
 	}
 
 	printf("Checking initial packets...\n");
 	if (ilt_dada_check_network(&cfg) < 0) {
+		printf("Exiting.\n");
+		return 1;
+	}
+
+	printf("Initialisng ringbuffer...\n");
+	if (ilt_dada_initialise_ringbuffer(&cfg) < 0) {
 		printf("Exiting.\n");
 		return 1;
 	}
