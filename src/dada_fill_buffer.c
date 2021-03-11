@@ -16,29 +16,39 @@
 #include "ilt_dada.h"
 
 #define PACKET_SIZE (UDPHDRLEN + UDPNPOL * UDPNTIMESLICE * 122)
+#define HOSTLEN 2048
 
 int main(int argc, char *argv[]) {
 
 	int inputOpt, packets = 0, dadaInput, waitTime = 1;
-	char inputFile[2048] = "", workingName[2048] = "", hostname[2048] = "";
+	char inputFile[2048] = "", workingName[2048] = "", hostIP[HOSTLEN] = "localhost";
 	long totalPackets = LONG_MAX, packetCount = 0, writtenBytes, datums;
 	int numPorts = 1;
 	int offset = 10, port = 16130, fullReads = 1, portOffset = 1;
 
 	char* rawData[MAX_NUM_PORTS];
 	FILE *inputFiles[MAX_NUM_PORTS];
-	ipcio_t ringbuffer[MAX_NUM_PORTS];
-	ipcio_t header[MAX_NUM_PORTS];
+	static ipcio_t ringbuffer[MAX_NUM_PORTS] = { IPCIO_INIT };
+	static ipcio_t header[MAX_NUM_PORTS] = { IPCIO_INIT };
 
 	ilt_dada_config config[MAX_NUM_PORTS] = { ilt_dada_config_default };
 	ilt_dada_operate_params params[MAX_NUM_PORTS] = { ilt_dada_operate_params_default };
 
-	while((inputOpt = getopt(argc, argv, "ui:p:n:k:t:w:")) != -1) {
+
+	config[0].portNum = 16130;
+	config[0].packetsPerIteration = 1024;
+	config[0].key = 16130;
+
+	while((inputOpt = getopt(argc, argv, "u:H:i:p:n:k:t:w:")) != -1) {
 		switch(inputOpt) {
 
 			case 'u':
 				packets = 1;
-				sscanf(optarg, "%s:%d,%d", config[0].hostname, &(config[0].portNum), &portOffset);
+				sscanf(optarg, "%d,%d", &(config[0].portNum), &portOffset);
+				break;
+
+			case 'H':
+				strcpy(&(hostIP[0]), optarg);
 				break;
 			
 			case 'i':
@@ -78,11 +88,10 @@ int main(int argc, char *argv[]) {
 
 	printf("Preparing to load data from %d file(s) following format %s, with %d packets per iteration.\n", numPorts, inputFile, config[0].packetsPerIteration);
 
-	printf("These will be loaded into the ringbuffers starting at %d with an offset of %d via ", config[0].key, offset);
 	if (packets) {
-		printf("UDP packets starting on host/port %s:%d with an offset of 1. \n", config[0].hostname, config[0].portNum);
+		printf("We will be using UDP packets to copy the data starting on host/port %s:%d with an offset of 1. \n", hostIP, config[0].portNum);
 	} else {
-		printf("copying data directly to the ringbuffer.\n\n");
+		printf("We will be copying the data into the ringbuffers starting at %d with an offset of %d by copying data directly to the ringbuffer.\n\n", config[0].key, offset);
 	}
 
 
@@ -90,7 +99,6 @@ int main(int argc, char *argv[]) {
 	config[0].params = &(params[0]);
 
 	for (int port = 1; port < numPorts; port++) {
-		strcpy(config[port].hostname, config[0].hostname);
 		config[port].portNum = config[0].portNum + port * portOffset;
 
 		config[port].packetsPerIteration = config[0].packetsPerIteration;
@@ -99,8 +107,6 @@ int main(int argc, char *argv[]) {
 		config[port].key = config[0].key + offset * port;
 		config[port].params = &(params[port]);
 
-		ringbuffer[port] = IPCIO_INIT;
-		header[port] = IPCIO_INIT;
 		config[port].ringbuffer = &ringbuffer[port];
 		config[port].header = &header[port];
 		config[port].nbufs = 16;
@@ -108,12 +114,34 @@ int main(int argc, char *argv[]) {
 	}
 
 
+	struct addrinfo *serverInfo;
+
 	if (packets == 1) {
-		for (int port = 1; port < numPorts; port++) {
+		for (int port = 0; port < numPorts; port++) {
 			if (ilt_dada_initialise_port(&(config[port])) < 0) {
 				return 1;
 			}
 		}
+
+		struct addrinfo addressInfo = {
+			.ai_family = AF_UNSPEC,
+			.ai_socktype = SOCK_DGRAM,
+			.ai_flags = IPPROTO_UDP
+		};
+
+		// Convert the port to a string for getaddrinfo
+		char portNumStr[16];
+		sprintf(portNumStr, "%d", config[0].portNum);
+
+		// Struct to collect the results from getaddrinfo
+		int status;
+
+		// Populate the remaining parts of addressInfo
+		if ((status = getaddrinfo(hostIP, portNumStr, &addressInfo, &serverInfo)) < 0) {
+			fprintf(stderr, "ERROR: Failed to get address info on port %d (errno %d: %s).", config->portNum, status, gai_strerror(status));
+			return -1;
+		}
+
 	}
 
 
@@ -127,9 +155,9 @@ int main(int argc, char *argv[]) {
 			return 1;
 		}
 
-		printf("Allocating %ld MB for %d %d byte packets on port %d\n", (long) config[0].packetsPerIteration * PACKET_SIZE >> 20, config[0].packetsPerIteration, PACKET_SIZE, port);
 		
 		if (packets == 0) {
+			printf("Allocating %ld MB for %d %d byte packets on port %d\n", (long) config[0].packetsPerIteration * PACKET_SIZE >> 20, config[0].packetsPerIteration, PACKET_SIZE, port);
 			rawData[port] = calloc(config[0].packetsPerIteration * PACKET_SIZE, sizeof(char));
 
 			if (rawData[port] == NULL) {
@@ -144,10 +172,13 @@ int main(int argc, char *argv[]) {
 			if (ilt_data_operate_prepare(&(config[port])) < 0) {
 				return 1;
 			}
+
+			if (connect(config[port].sockfd, serverInfo->ai_addr, sizeof(struct sockaddr))== -1) {
+				fprintf(stderr, "ERROR: Unable to connect to remote host %s:%d (errno %d, %s)\n", hostIP, config[port].portNum, errno, strerror(errno));
+				return 1;
+			}
+
 		}
-
-
-
 	}
 
 
@@ -155,7 +186,11 @@ int main(int argc, char *argv[]) {
 	while (packetCount < totalPackets && fullReads) {
 		for (int port = 0; port < numPorts; port++) {
 
-			datums = fread(rawData[port], sizeof(char), config[port].packetsPerIteration * PACKET_SIZE, inputFiles[port]);
+			if (packets == 0) {
+				datums = fread(rawData[port], sizeof(char), config[port].packetsPerIteration * PACKET_SIZE, inputFiles[port]);
+			} else {
+				datums = fread(&(config[port].params->packetBuffer[0]), sizeof(char), config[port].packetsPerIteration * PACKET_SIZE, inputFiles[port]);
+			}
 
 			if (datums != config[port].packetsPerIteration * PACKET_SIZE) {
 				fullReads = 0;
@@ -170,11 +205,11 @@ int main(int argc, char *argv[]) {
 			}
 
 			if (writtenBytes != datums) {
-				fprintf(stderr, "WARNING Port %d: Tried to send/write %ld bytes to buffer but only wrote %ld.\n", port, datums, writtenBytes);
+				fprintf(stderr, "WARNING Port %d: Tried to send/write %ld bytes to buffer but only wrote %ld (errno: %d, %s).\n", port, datums, writtenBytes, errno, strerror(errno));
 			} else {
 				printf("Port %d: sent/wrote %d packets to buffer.\n", port, config[port].packetsPerIteration);
 			}
-		}ilt_dada_operate_cleanup(config);
+		}
 		printf("\n\n");
 		usleep(1000 * waitTime);
 	}
@@ -183,10 +218,12 @@ int main(int argc, char *argv[]) {
 	for (int port = 0; port < numPorts; port++) {
 		printf("Freeing memory/closing file for port %d\n", port);
 
+		ilt_dada_operate_cleanup(config);
 		ilt_dada_cleanup(&(config[port]));
 		free(rawData[port]);	
 		fclose(inputFiles[port]);
 	}
 
+	cleanup_initialise_port(serverInfo, -1);
 
 }

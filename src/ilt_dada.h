@@ -71,7 +71,6 @@ extern ilt_dada_operate_params ilt_dada_operate_params_default;
 
 typedef struct ilt_dada_config {
 	// UDP configuration
-	char hostname[2048];
 	int portNum;
 	long portBufferSize;
 	int portPriority;

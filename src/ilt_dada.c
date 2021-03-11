@@ -18,7 +18,6 @@ ilt_dada_operate_params ilt_dada_operate_params_default = {
 ilt_dada_config ilt_dada_config_default = {
 
 	// UDP configuration
-	.hostname = NULL,
 	.portNum = -1,
 	.portBufferSize = -1,
 	.portPriority = 6,
@@ -105,7 +104,7 @@ int ilt_dada_initialise_port(ilt_dada_config *config) {
 	int status;
 
 	// Populate the remaining parts of addressInfo
-	if ((status = getaddrinfo(config->hostname, portNumStr, &addressInfo, &serverInfo)) < 0) {
+	if ((status = getaddrinfo(NULL, portNumStr, &addressInfo, &serverInfo)) < 0) {
 		fprintf(stderr, "ERROR: Failed to get address info on port %d (errno %d: %s).", config->portNum, status, gai_strerror(status));
 		return -1;
 	}
