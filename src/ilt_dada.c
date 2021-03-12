@@ -672,9 +672,14 @@ int ilt_data_operate_prepare(ilt_dada_config *config) {
 }
 
 void ilt_dada_operate_cleanup(ilt_dada_config *config) {
-	free(config->params->packetBuffer);
-	free(config->params->msgvec);
-	free(config->params->iovecs);
+	if (config->params->packetBuffer != NULL)
+		free(config->params->packetBuffer);
+	
+	if (config->params->msgvec != NULL)
+		free(config->params->msgvec);
+	
+	if (config->params->iovecs != NULL)
+		free(config->params->iovecs);
 }
 
 void ilt_dada_packet_comments(ilt_dada_config *config) {
