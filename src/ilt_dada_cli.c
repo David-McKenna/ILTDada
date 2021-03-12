@@ -16,9 +16,10 @@ int main(int argc, char  *argv[]) {
 
 	char inputOpt;
 	int bufferMul = 64;
-	float targetSeconds = 0.0;
+	float targetSeconds = -1.0;
+	char startTime[1024] = "", endTime[1024] = "";
 
-	while ((inputOpt = getopt(argc, argv, "p:k:n:m:s:t:r:")) != -1) {
+	while ((inputOpt = getopt(argc, argv, "p:k:n:m:s:t:S:T:r:")) != -1) {
 		switch (inputOpt) {
 
 			case 'p':
@@ -44,6 +45,14 @@ int main(int argc, char  *argv[]) {
 
 			case 't':
 				cfg.endPacket = atoi(optarg) * 12207;
+				break;
+
+			case 'S':
+
+				break;
+
+			case 'T':
+
 				break;
 
 			case 'r':

@@ -55,6 +55,12 @@
 #ifndef __ILT_DADA_STRUCTS
 #define __ILT_DADA_STRUCTS
 
+typedef enum {
+	NO_CHECKS,
+	CHECK_ALL_PACKETS,
+	CHECK_FIRST_LAST
+} checkParameterTypes;
+
 typedef struct ilt_dada_operate_params {
 	char *packetBuffer;
 	struct mmsghdr *msgvec;
@@ -63,6 +69,8 @@ typedef struct ilt_dada_operate_params {
 	
 	long packetsSeen;
 	long packetsExpected;
+	long packetsLastSeen;
+	long packetsLastExpected;
 	long finalPacket;
 	int firstLoop;
 	long bytesWritten;
@@ -81,9 +89,7 @@ typedef struct ilt_dada_config {
 	// ILTDada runtime options
 	int checkInitParameters;
 	int checkInitData;
-	int checkObsParameters;
-	int checkObsData;
-	int checkPackets;
+	int checkParameters;
 	int cleanupTimeout;
 
 
@@ -120,10 +126,12 @@ extern ilt_dada_config ilt_dada_config_default;
 #endif
 
 
-
 #ifndef __ILT_DADA_INLINE_PACKETNO
 #define __ILT_DADA_INLINE_PACKETNO
-extern inline long beamformed_packno(unsigned int timestamp, unsigned int sequence, unsigned int clock200MHz);
+inline long beamformed_packno(unsigned int timestamp, unsigned int sequence, unsigned int clock200MHz) {
+ 	//VERBOSE(printf("Packetno: %d, %d, %d\n", timestamp, sequence, clock200MHz););
+	return ((timestamp*1000000l*(160+40*clock200MHz)+512)/1024+sequence)/16;
+}
 #endif
 
 
@@ -138,11 +146,12 @@ extern "C" {
 // Main functions
 int ilt_dada_initialise_port(ilt_dada_config *config);
 int ilt_dada_initialise_ringbuffer(ilt_dada_config *config);
-int ilt_dada_cleanup(ilt_dada_config *config);
+void ilt_dada_cleanup(ilt_dada_config *config);
 
 
 int ilt_dada_check_config(ilt_dada_config *config);
 int ilt_dada_check_network(ilt_dada_config *config);
+int ilt_dada_check_header(ilt_dada_config *config, unsigned char* buffer);
 
 int ilt_dada_operate(ilt_dada_config *config);
 int ilt_dada_operate_loop(ilt_dada_config *config);

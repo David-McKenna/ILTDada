@@ -10,6 +10,8 @@ ilt_dada_operate_params ilt_dada_operate_params_default = {
 	
 	.packetsSeen = 0,
 	.packetsExpected = 0,
+	.packetsLastSeen = 0,
+	.packetsLastExpected = 0,
 	.finalPacket = -1,
 	.firstLoop = 1,
 	.bytesWritten = 0
@@ -29,9 +31,7 @@ ilt_dada_config ilt_dada_config_default = {
 	// Startup configuration
 	.checkInitParameters = 1,
 	.checkInitData = 1,
-	.checkObsParameters = 1,
-	.checkObsData = 1,
-	.checkPackets = 1,
+	.checkParameters = CHECK_FIRST_LAST,
 
 	// Observation configuration
 	.startPacket = -1,
@@ -59,11 +59,6 @@ ilt_dada_config ilt_dada_config_default = {
 	.multilog = NULL,
 	.params = NULL
 };
-
-inline long beamformed_packno(unsigned int timestamp, unsigned int sequence, unsigned int clock200MHz) {
- 	//VERBOSE(printf("Packetno: %d, %d, %d\n", timestamp, sequence, clock200MHz););
-	return ((timestamp*1000000l*(160+40*clock200MHz)+512)/1024+sequence)/16;
-}
 
 /**
  * @brief      Initialise a UDP network docket on the gien port number and
@@ -139,7 +134,7 @@ int ilt_dada_initialise_port(ilt_dada_config *config) {
 	// https://linux.die.net/man/7/socket 
 	// https://linux.die.net/man/2/setsockopt
 	long optVal = 0;
-	int optLen = sizeof(optVal);
+	unsigned int optLen = sizeof(optVal);
 	if (getsockopt(sockfd_init, SOL_SOCKET, SO_RCVBUF, &optVal, &optLen) == -1) {
 		fprintf(stderr, "ERROR: Failed to get buffer size on port %d (errno%d: %s).\n", config->portNum, errno, strerror(errno));
 		cleanup_initialise_port(serverInfo, sockfd_init);
@@ -164,6 +159,8 @@ int ilt_dada_initialise_port(ilt_dada_config *config) {
 				int dummy = fscanf(rmemMax, "%ld", &rmemMaxVal);
 				if (rmemMaxVal < config->portBufferSize) {
 					fprintf(stderr, "ERROR: This was because your kernel has the maximum UDP buffer size set to a lower value than you requested (%ld).\nERROR: Please increase the value stored in /proc/sys/net/core/rmem_max if you want to use a larger buffer.\n", rmemMaxVal);
+				} else if (dummy <= 0) {
+					fprintf(stderr, "ERROR: This may be due to your maximum socket buffer being too low, but we could not read /proc/sys/net/core/rmem_max to verify this.\n");
 				}
 				fclose(rmemMax);
 			}
@@ -384,13 +381,52 @@ int ilt_dada_check_network(ilt_dada_config *config) {
 
 	// Read the first packet in the queue into the buffer
 	unsigned char buffer[MAX_UDP_LEN];
-	printf("Recv\n");
 	if (recvfrom(config->sockfd, &buffer[0], MAX_UDP_LEN, MSG_PEEK, NULL, NULL) == -1) {
 		fprintf(stderr, "ERROR: Unable to peek at first packet (errno %d, %s).", errno, strerror(errno));
 		return -1;
 	}
-	printf("Peek'd\n");
 
+	int returnVal = 0;
+	if ((returnVal = ilt_dada_check_header(config, &buffer[0])) < 0) {
+		return returnVal;
+	}
+
+
+	// Check that the packet doesn't only contain 0-values
+	lofar_source_bytes *source = (lofar_source_bytes*) &(buffer[1]);
+	if (config->checkInitData) {
+		int checkData = 0;
+		// Number of data samples = number of time samples * (number of beamlets / width of sample)
+		// 4-bt mode == bitMode = 2, divide by 2 to get number of chars
+		// 8-bit, bitmode = 1, divide by 1
+		// 16-bit, bitmode = 0, divide by 0.5
+		int dataSamples = UDPNTIMESLICE * ((int) buffer[6] / (source->bitMode ? source->bitMode : 0.5));
+		for (int idx = 16; idx < dataSamples; idx++) {
+			if (buffer[idx] != 0) {
+				checkData = 1;
+				break;
+			}
+		}
+
+		if (checkData == 0) {
+			fprintf(stderr, "WARNING: First packet on port %d only contained 0-valued samples.", config->portNum);
+			return -3;
+		}
+	}
+
+	config->obsClockBit = source->clockBit;
+	config->obsBitMode = source->bitMode;
+	// 16 + (61,122,244) * 16 * 4 / (0.5 1, 2)
+	// Max == 7824
+	config->packetSize = (int) (UDPHDRLEN + buffer[6] * buffer[7] * ((float) UDPNPOL / (source->bitMode ? source->bitMode : 0.5)));
+
+
+	config->currentPacket = beamformed_packno(*((unsigned int*) &(buffer[8])), *((unsigned int*) &(buffer[12])), source->clockBit); 
+
+	return 0;
+}
+
+int ilt_dada_check_header(ilt_dada_config *config, unsigned char* buffer) {
 	// Sanity check the components of the CEP packet header
 	lofar_source_bytes *source = (lofar_source_bytes*) &(buffer[1]);
 	if (config->checkInitParameters) {
@@ -450,37 +486,6 @@ int ilt_dada_check_network(ilt_dada_config *config) {
 		}
 	}
 
-
-	// Check that the packet doesn't only contain 0-values
-	if (config->checkInitData) {
-		int checkData = 0;
-		// Number of data samples = number of time samples * (number of beamlets / width of sample)
-		// 4-bt mode == bitMode = 2, divide by 2 to get number of chars
-		// 8-bit, bitmode = 1, divide by 1
-		// 16-bit, bitmode = 0, divide by 0.5
-		int dataSamples = UDPNTIMESLICE * ((int) buffer[6] / (source->bitMode ? source->bitMode : 0.5));
-		for (int idx = 16; idx < dataSamples; idx++) {
-			if (buffer[idx] != 0) {
-				checkData = 1;
-				break;
-			}
-		}
-
-		if (checkData == 0) {
-			fprintf(stderr, "WARNING: First packet on port 0 only contained 0-valued samples.");
-			return -3;
-		}
-	}
-
-	config->obsClockBit = source->clockBit;
-	config->obsBitMode = source->bitMode;
-	// 16 + (61,122,244) * 16 * 4 / (0.5 1, 2)
-	// Max == 7824
-	config->packetSize = (int) (UDPHDRLEN + buffer[6] * buffer[7] * ((float) UDPNPOL / (source->bitMode ? source->bitMode : 0.5)));
-
-
-	config->currentPacket = beamformed_packno(*((unsigned int*) &(buffer[8])), *((unsigned int*) &(buffer[12])), source->clockBit); 
-
 	return 0;
 }
 
@@ -501,13 +506,11 @@ int ilt_dada_operate(ilt_dada_config *config) {
 												.bytesWritten = 0
 											};
 	params.finalPacket = config->startPacket;
-
 	config->params = &params;
 
 	if (ilt_data_operate_prepare(config) < 0) {
 		return -1;
 	} 
-
 
 	// Consume first packet
 	if (recvfrom(config->sockfd, &(config->params->packetBuffer[0]), MAX_UDP_LEN, MSG_PEEK, NULL, NULL) == -1) {
@@ -521,12 +524,7 @@ int ilt_dada_operate(ilt_dada_config *config) {
 		return -1;
 	}
 
-	printf("Current packet no.: %ld\n", config->currentPacket);
-	long finalPacketOffset = (config->packetsPerIteration - 1) * config->packetSize;
 	config->params->finalPacket = config->startPacket;
-
-	// TEMP
-	config->endPacket += config->currentPacket;
 
 
 
@@ -576,57 +574,90 @@ int ilt_dada_operate(ilt_dada_config *config) {
 	return 0;
 }
 
+
+
+/*
+	// https://man7.org/linux/man-pages/man2/recvmmsg.2.html
+       int recvmmsg(int sockfd, struct mmsghdr *msgvec, unsigned int vlen,
+                    int flags, struct timespec *timeout);
+*/
+
+
+/**
+ * @brief      The main loop of the recorder; receive packets and copy them to a PSRDADA ringbuffer
+ *
+ * @param      config  The recording configuration
+ *
+ * @return     0: Success, -1: Early Exit / Failure
+ */
 int ilt_dada_operate_loop(ilt_dada_config *config) {
-	char *bufferPointer;
 	int readPackets;
 	long finalPacketOffset = (config->packetsPerIteration - 1) * config->packetSize;
 	long lastPacket;
 	size_t writeBytes, writtenBytes;
 
 
+	// While we still have data to record,
 	while (config->currentPacket < config->params->finalPacket || config->params->firstLoop == 1) {
-		printf("Entering main loop: %ld, %ld, %d\n", config->currentPacket, config->params->finalPacket, config->params->firstLoop);
+		// Record the next N pckets
 		readPackets = recvmmsg(config->sockfd, config->params->msgvec, config->packetsPerIteration, config->recvflags, config->params->timeout);
 		
+
+		// Sanity check the amount that are read
 		if (readPackets < 0) {
 			fprintf(stderr, "ERROR: recvmmsg on port %d (errno %d: %s)\n", config->portNum, errno, strerror(errno));
 			return -1;
 		}
 		if (readPackets != config->packetsPerIteration) {
-			fprintf(stderr, "ERROR: recvmmsg on port %d received less packets than requested (expected,%d, recieved %d)\n", config->portNum, config->packetsPerIteration, readPackets);
+			fprintf(stderr, "WARNING: recvmmsg on port %d received less packets than requested (expected,%d, recieved %d)\n", config->portNum, config->packetsPerIteration, readPackets);
 		}
 
 
-		if (config->checkPackets) {
+		// Check the packets for errors
+		if (config->checkParameters == CHECK_ALL_DATA) {
 			for (int packetIdx = 0; packetIdx < config->packetsPerIteration; packetIdx++) {
 				// Sanity check packet contents / flags?
 			}
+		} else if (config->checkParameters == CHECK_FIRST_LAST) {
+			if (ilt_dada_check_header(config, (unsigned char*) &config->params->packetBuffer[0]) < 0 || ilt_dada_check_header(config, (unsigned char*) &config->params->packetBuffer[finalPacketOffset]) < 0) {
+				fprintf(stderr, "ERROR: port header data corrupted on port %d, exiting.\n\n", config->portNum);
+				return -1;
+			}
 		}
 
-	
+		// Write the raw packets to the ringbuffer
 		writeBytes = readPackets * config->packetSize;
 		writtenBytes = ipcio_write(config->ringbuffer, &(config->params->packetBuffer[0]), writeBytes);
 
+		// Check that all the packets were written
 		if (writtenBytes != writeBytes) {
 			fprintf(stderr, "WARNING Port %d: Tried to write %ld bytes to buffer but only wrote %ld.\n", config->portNum, writeBytes, writtenBytes);
 		}
 		config->params->bytesWritten += writtenBytes;
 
-
+		// Get the last packet number
 		lastPacket = beamformed_packno(*((unsigned int*) &(config->params->packetBuffer[finalPacketOffset + 8])), *((unsigned int*) &(config->params->packetBuffer[finalPacketOffset + 12])), ((lofar_source_bytes*) &(config->params->packetBuffer[1]))->clockBit);
 
 		// Calcualte packet loss / misses / etc.
 		config->params->packetsSeen += readPackets;
 		config->params->packetsExpected += lastPacket - config->currentPacket;
+		config->params->packetsLastSeen += readPackets;
+		config->params->packetsLastExpected += lastPacket - config->currentPacket;
 
 		config->currentPacket = lastPacket;
 		config->params->firstLoop = 0;
 	}
 
-	printf("Exit main loop\n");
 	return 0;
 }
 
+/**
+ * @brief      Setup the memory and structures needed to receive packets via recvmmsg
+ *
+ * @param      config  The recording configuration
+ *
+ * @return     0: Success, -1: Failure
+ */
 int ilt_data_operate_prepare(ilt_dada_config *config) {
 
 	// Allocate memory for buffers
@@ -671,6 +702,11 @@ int ilt_data_operate_prepare(ilt_dada_config *config) {
 	return 0;
 }
 
+/**
+ * @brief      Cleanup the memory allocated to receive packets via recvmmsg
+ *
+ * @param      config  The recording configuration
+ */
 void ilt_dada_operate_cleanup(ilt_dada_config *config) {
 	if (config->params->packetBuffer != NULL)
 		free(config->params->packetBuffer);
@@ -682,20 +718,27 @@ void ilt_dada_operate_cleanup(ilt_dada_config *config) {
 		free(config->params->iovecs);
 }
 
+/**
+ * @brief      Log information on packet loss, total observed packets
+ *
+ * @param      config  The recording configuration
+ */
 void ilt_dada_packet_comments(ilt_dada_config *config) {
 	;
 }
 
 
-/*
-	// https://man7.org/linux/man-pages/man2/recvmmsg.2.html
-       int recvmmsg(int sockfd, struct mmsghdr *msgvec, unsigned int vlen,
-                    int flags, struct timespec *timeout);
-*/
 
 
 
-int ilt_dada_cleanup(ilt_dada_config *config) {
+
+/**
+ * @brief      Cleanup the sockets and memory used for the recorder and
+ *             ringbuffer
+ *
+ * @param      config  The recording configuration
+ */
+void ilt_dada_cleanup(ilt_dada_config *config) {
 
 
 	// Close the socket if it was successfully created

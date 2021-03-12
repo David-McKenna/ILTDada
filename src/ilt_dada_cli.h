@@ -1,6 +1,7 @@
 
 // Main includes
 #include "ilt_dada.h"
+#include "lofar_cli_meta.h"
 
 
 // CLI includes
