@@ -32,11 +32,11 @@ PREFIX ?= /usr/local
 all: cli test-cli
 
 cli: $(CLI_OBJECTS)
-	$(CC) $(CFLAGS) $(CLI_OBJECTS) -o ./ilt_dada $(LFLAGS)
-	$(CC) $(CFLAGS) $(CLI_OBJECTS) -o ./ilt_dada_dada2disk $(LFLAGS)
+	$(CC) $(CFLAGS) $(OBJECTS) src/recorder/ilt_dada_cli.o -o ./ilt_dada $(LFLAGS)
+	$(CC) $(CFLAGS) $(OBJECTS) src/recorder/ilt_dada_dada2disk.o -o ./ilt_dada_dada2disk $(LFLAGS)
 
 test-cli: $(TEST_CLI_OBJECTS) 
-	$(CC) $(CFLAGS) $(TEST_CLI_OBJECTS)  -o ./ilt_dada_fill_buffer $(LFLAGS)
+	$(CC) $(CFLAGS) $(TEST_CLI_OBJECTS) -o ./ilt_dada_fill_buffer $(LFLAGS)
 
 
 # Install CLI, headers, library
