@@ -15,7 +15,7 @@ CFLAGS += -W -Wall -Ofast -march=$(OPT_ARCH) -mtune=$(OPT_ARCH) -fPIC -funswitch
 DEFINES += -DVERSION=$(LIB_VER) -DVERSION_MINOR=$(LIB_VER_MINOR) -DVERSIONCLI=$(CLI_VER)
 CFLAGS += $(DEFINES)
 
-LFLAGS 	+= -I./src -lpsrdada -llofudpman #-lefence
+LFLAGS 	+= -I./src/lib -lpsrdada -llofudpman #-lefence
 
 # Define our general build targets
 OBJECTS = src/lib/ilt_dada.o
