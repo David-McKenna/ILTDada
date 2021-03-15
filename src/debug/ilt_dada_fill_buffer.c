@@ -27,8 +27,8 @@ int main(int argc, char *argv[]) {
 	int offset = 10, fullReads = 1, portOffset = 1;
 
 	FILE *inputFiles[MAX_NUM_PORTS];
-	static ipcio_t ringbuffer[MAX_NUM_PORTS] = { IPCIO_INIT };
-	static ipcio_t header[MAX_NUM_PORTS] = { IPCIO_INIT };
+	static ipcio_t ringbuffer[MAX_NUM_PORTS];
+	static ipcio_t header[MAX_NUM_PORTS];
 
 	ilt_dada_config config[MAX_NUM_PORTS] = { ilt_dada_config_default };
 	ilt_dada_operate_params params[MAX_NUM_PORTS] = { ilt_dada_operate_params_default };
@@ -108,6 +108,8 @@ int main(int argc, char *argv[]) {
 		config[port].key = config[0].key + offset * port;
 		config[port].params = &(params[port]);
 
+		ringbuffer[port] = IPCIO_INIT;
+		header[port] = IPCIO_INIT;
 		config[port].ringbuffer = &(ringbuffer[port]);
 		config[port].header = &(header[port]);
 		config[port].nbufs = 32;
