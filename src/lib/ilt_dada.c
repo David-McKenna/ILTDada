@@ -13,7 +13,7 @@ ilt_dada_operate_params ilt_dada_operate_params_default = {
 	.packetsLastSeen = 0,
 	.packetsLastExpected = 0,
 	.finalPacket = -1,
-	.firstLoop = 1,
+	.minReads = 1,
 	.bytesWritten = 0
 };
 
@@ -28,14 +28,15 @@ ilt_dada_config ilt_dada_config_default = {
 	.recvflags = 0,
 
 
-	// Startup configuration
+	// Recorder checks configuration
 	.checkInitParameters = 1,
 	.checkInitData = 1,
 	.checkParameters = CHECK_FIRST_LAST,
+	.cleanupTimeout = 10.0,
 
 	// Observation configuration
 	.startPacket = -1,
-	.endPacket = LONG_MAX,
+	.endPacket = -1,
 	.packetsPerIteration = 256, // ~0.67 seconds of data
 	.obsClockBit= -1,
 	.obsBitMode = -1,
@@ -114,10 +115,12 @@ int ilt_dada_initialise_port(ilt_dada_config *config) {
 	}
 
 	// Attempt to bind to the socket
-	if (bind(sockfd_init, serverInfo->ai_addr, serverInfo->ai_addrlen) == -1) {
-		fprintf(stderr, "ERROR: Failed to bind to port %d (errno %d: %s).", config->portNum, errno, strerror(errno));
-		cleanup_initialise_port(serverInfo, sockfd_init);
-		return -1;
+	if (config->recvflags != -1) {  
+		if (bind(sockfd_init, serverInfo->ai_addr, serverInfo->ai_addrlen) == -1) {
+			fprintf(stderr, "ERROR: Failed to bind to port %d (errno %d: %s).", config->portNum, errno, strerror(errno));
+			cleanup_initialise_port(serverInfo, sockfd_init);
+			return -1;
+		}
 	}
 
 	// We have successfuly build and binded to a socket, let's tweak some of
@@ -502,7 +505,7 @@ int ilt_dada_operate(ilt_dada_config *config) {
 												.timeout = NULL, 
 												.packetsSeen = 0,
 												.packetsExpected = 0,
-												.firstLoop = 1,
+												.minReads = 1,
 												.bytesWritten = 0
 											};
 	params.finalPacket = config->startPacket;
@@ -560,12 +563,14 @@ int ilt_dada_operate(ilt_dada_config *config) {
 	// Print debug information about the observing run
 	ilt_dada_packet_comments(config);
 
+	printf("%d\n", ipcbuf_get_reader_conn((ipcbuf_t *) config->ringbuffer));
 	// Mark the data as completed
 	if (ipcio_stop(config->ringbuffer) < 0) {
 		fprintf(stderr, "ERROR: Failed to mark end of data on port %d, exiting.\n", config->portNum);
 		ilt_dada_operate_cleanup(config);
 		return -1;
 	}
+	printf("%d\n", ipcbuf_get_reader_conn((ipcbuf_t *) config->ringbuffer));
 
 	// Cleanup buffers
 	ilt_dada_operate_cleanup(config);
@@ -598,7 +603,7 @@ int ilt_dada_operate_loop(ilt_dada_config *config) {
 
 
 	// While we still have data to record,
-	while (config->currentPacket < config->params->finalPacket || config->params->firstLoop == 1) {
+	while (config->currentPacket < config->params->finalPacket || config->params->minReads > 0) {
 		// Record the next N pckets
 		readPackets = recvmmsg(config->sockfd, config->params->msgvec, config->packetsPerIteration, config->recvflags, config->params->timeout);
 		
@@ -614,7 +619,7 @@ int ilt_dada_operate_loop(ilt_dada_config *config) {
 
 
 		// Check the packets for errors
-		if (config->checkParameters == CHECK_ALL_DATA) {
+		if (config->checkParameters == CHECK_ALL_PACKETS) {
 			for (int packetIdx = 0; packetIdx < config->packetsPerIteration; packetIdx++) {
 				// Sanity check packet contents / flags?
 			}
@@ -645,7 +650,11 @@ int ilt_dada_operate_loop(ilt_dada_config *config) {
 		config->params->packetsLastExpected += lastPacket - config->currentPacket;
 
 		config->currentPacket = lastPacket;
-		config->params->firstLoop = 0;
+		config->params->minReads -= 1;
+
+		if (config->currentPacket < config->params->finalPacket && config->params->minReads < 0) {
+			config->params->minReads = 2 * config->bufsz / (config->packetsPerIteration * config->packetSize);
+		}
 	}
 
 	return 0;
@@ -749,13 +758,18 @@ void ilt_dada_cleanup(ilt_dada_config *config) {
 
 	// Wait for readers to finish up and exit, or timeout
 	float totalSleep = 0.0;
+	printf("%d\n", ipcbuf_get_reader_conn((ipcbuf_t *) config->ringbuffer));
+
 	while (totalSleep < config->cleanupTimeout) {
+		printf("%d\n", ipcbuf_get_reader_conn((ipcbuf_t *) config->ringbuffer));
 		if (ipcbuf_get_reader_conn((ipcbuf_t *) config->ringbuffer) != 0) {
 			break;
 		}
 
-		sleep(0.1);
+		usleep(1000 * 5);
+		totalSleep += 0.005;
 	}
+	printf("%d\n", ipcbuf_get_reader_conn((ipcbuf_t *) config->ringbuffer));
 
 	// Close, disconnect and destroy the ringbuffer
 	ipcio_close(config->ringbuffer);

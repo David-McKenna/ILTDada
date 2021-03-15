@@ -15,12 +15,16 @@ int main(int argc, char  *argv[]) {
 
 
 	char inputOpt;
-	int bufferMul = 64;
-	float targetSeconds = -1.0;
+	int bufferMul = 64, clock = 1;
+	float targetSeconds = 5.0;
 	char startTime[1024] = "", endTime[1024] = "";
 
-	while ((inputOpt = getopt(argc, argv, "p:k:n:m:s:t:S:T:r:")) != -1) {
+	while ((inputOpt = getopt(argc, argv, "cp:k:n:m:s:t:S:T:r:")) != -1) {
 		switch (inputOpt) {
+
+			case 'c':
+				clock = 0;
+				break;
 
 			case 'p':
 				cfg.portNum = atoi(optarg);
@@ -44,15 +48,15 @@ int main(int argc, char  *argv[]) {
 				break;
 
 			case 't':
-				cfg.endPacket = atoi(optarg) * 12207;
+				cfg.endPacket = (long) atof(optarg) * 12207;
 				break;
 
 			case 'S':
-
+				strcpy(startTime, optarg);
 				break;
 
 			case 'T':
-
+				strcpy(endTime, optarg);
 				break;
 
 			case 'r':
@@ -64,6 +68,28 @@ int main(int argc, char  *argv[]) {
 				return 1;
 		}
 	}
+
+	if (strcmp(startTime, "") == 0) {
+		time_t currTime;
+		time(&currTime);
+		// Subtract a second so that we will always start recording immediately
+		currTime -= 1;
+		strftime(startTime, sizeof startTime, "%Y-%m-%dT%H:%M:%S", gmtime(&currTime));
+	}
+
+	cfg.startPacket = getStartingPacket(startTime, clock);
+
+	if (cfg.endPacket > 0) {
+		if (strcmp(endTime, "") != 0) {
+			fprintf(stderr, "WARNING: Prioritising observation length (%f) over end time stamp (%s).\n", (float) cfg.endPacket / 12207, endTime);
+		}
+		
+		cfg.endPacket += cfg.startPacket;
+	} else if (strcmp(endTime, "") != 0) {
+		cfg.endPacket = getStartingPacket(endTime, clock);
+	}
+
+	printf("%ld, %ld\n", cfg.startPacket, cfg.endPacket);
 
 	cfg.bufsz = bufferMul * cfg.packetsPerIteration * MAX_UDP_LEN;
 	

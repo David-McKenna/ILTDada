@@ -15,12 +15,12 @@ CFLAGS += -W -Wall -Ofast -march=$(OPT_ARCH) -mtune=$(OPT_ARCH) -fPIC -funswitch
 DEFINES += -DVERSION=$(LIB_VER) -DVERSION_MINOR=$(LIB_VER_MINOR) -DVERSIONCLI=$(CLI_VER)
 CFLAGS += $(DEFINES)
 
-LFLAGS 	+= -I./src -lpsrdada #-lefence
+LFLAGS 	+= -I./src -lpsrdada -llofudpman #-lefence
 
 # Define our general build targets
-OBJECTS = src/ilt_dada.o
-CLI_OBJECTS = $(OBJECTS) src/ilt_dada_cli.o
-TEST_CLI_OBJECTS = $(OBJECTS) src/ilt_dada_fill_buffer.o
+OBJECTS = src/lib/ilt_dada.o
+CLI_OBJECTS = $(OBJECTS) src/recorder/ilt_dada_cli.o src/recorder/ilt_dada_dada2disk.o
+TEST_CLI_OBJECTS = $(OBJECTS) src/debug/ilt_dada_fill_buffer.o
 
 PREFIX ?= /usr/local
 
@@ -33,6 +33,7 @@ all: cli test-cli
 
 cli: $(CLI_OBJECTS)
 	$(CC) $(CFLAGS) $(CLI_OBJECTS) -o ./ilt_dada $(LFLAGS)
+	$(CC) $(CFLAGS) $(CLI_OBJECTS) -o ./ilt_dada_dada2disk $(LFLAGS)
 
 test-cli: $(TEST_CLI_OBJECTS) 
 	$(CC) $(CFLAGS) $(TEST_CLI_OBJECTS)  -o ./ilt_dada_fill_buffer $(LFLAGS)
@@ -48,16 +49,18 @@ install: cli test-cli
 
 # Remove local build arifacts
 clean:
-	-rm ./src/*.o
-	-rm ./ilt_dada_fill_buffer
+	-rm ./src/*/*.o
 	-rm ./ilt_dada
+	-rm ./ilt_dada_dada2disk
+	-rm ./ilt_dada_fill_buffer
 
 # Uninstall the software from the system
 remove:
-	rm $(PREFIX)/bin/ilt_dada_fill_buffer
-	rm $(PREFIX)/bin/ilt_dada_fill_buffer
-	cd src/; find . -name "*.h" -exec rm $(PREFIX)/include/{} \;
-	make clean
+	-rm $(PREFIX)/bin/ilt_dada
+	-rm $(PREFIX)/bin/ilt_dada_dada2disk
+	-rm $(PREFIX)/bin/ilt_dada_fill_buffer
+	-cd src/; find . -name "*.h" -exec rm $(PREFIX)/include/{} \;
+	-make clean
 
 
 

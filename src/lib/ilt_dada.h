@@ -2,9 +2,6 @@
 #ifndef __ILT_DADA_INCLUDE_H
 #define __ILT_DADA_INCLUDE_H
 
-// Include udpPacketManager general for consistant constants between the writer/consumer and easy access to the source bytes struct
-#include "lofar_udp_general.h"
-
 // Socket-related defines and includes (getaddrinfo man page requests all of them)
 #define _GNU_SOURCE 
 #include <sys/types.h>
@@ -26,15 +23,14 @@
 // Include for free();
 #include <stdlib.h>
 
-
-// lONG_MAX
-#include <limits.h>
-
-
 // PSRDADA includes
 #include "ipcio.h"
 #include "multilog.h"
-#include <stdint.h> // For uint64_t support
+
+// Include udpPacketManager general for consistant constants between the writer/consumer, easy access to the source bytes struct and the packet nubmer functions
+#include "lofar_udp_general.h"
+#include "lofar_udp_misc.h"
+
 
 #endif
 
@@ -72,7 +68,7 @@ typedef struct ilt_dada_operate_params {
 	long packetsLastSeen;
 	long packetsLastExpected;
 	long finalPacket;
-	int firstLoop;
+	int minReads;
 	long bytesWritten;
 } ilt_dada_operate_params;
 extern ilt_dada_operate_params ilt_dada_operate_params_default;
@@ -123,15 +119,6 @@ typedef struct ilt_dada_config {
 
 } ilt_dada_config;
 extern ilt_dada_config ilt_dada_config_default;
-#endif
-
-
-#ifndef __ILT_DADA_INLINE_PACKETNO
-#define __ILT_DADA_INLINE_PACKETNO
-inline long beamformed_packno(unsigned int timestamp, unsigned int sequence, unsigned int clock200MHz) {
- 	//VERBOSE(printf("Packetno: %d, %d, %d\n", timestamp, sequence, clock200MHz););
-	return ((timestamp*1000000l*(160+40*clock200MHz)+512)/1024+sequence)/16;
-}
 #endif
 
 

@@ -21,7 +21,7 @@
 int main(int argc, char *argv[]) {
 
 	int inputOpt, packets = 0, waitTime = 1;
-	char inputFile[2048] = "", workingName[2048] = "", hostIP[HOSTLEN] = "localhost";
+	char inputFile[2048] = "", workingName[2048] = "", hostIP[HOSTLEN] = "127.0.0.1";
 	long totalPackets = LONG_MAX, packetCount = 0, writtenBytes, readBytes;
 	int numPorts = 1;
 	int offset = 10, fullReads = 1, portOffset = 1;
@@ -37,6 +37,7 @@ int main(int argc, char *argv[]) {
 	config[0].portNum = 16130;
 	config[0].packetsPerIteration = 1024;
 	config[0].key = 16130;
+	config[0].recvflags = -1;
 
 	while((inputOpt = getopt(argc, argv, "u:H:i:p:n:k:t:w:")) != -1) {
 		switch(inputOpt) {
@@ -101,6 +102,8 @@ int main(int argc, char *argv[]) {
 
 		config[port].packetsPerIteration = config[0].packetsPerIteration;
 		config[port].portBufferSize = config[0].portBufferSize;
+		config[port].recvflags = config[0].recvflags;
+
 
 		config[port].key = config[0].key + offset * port;
 		config[port].params = &(params[port]);
