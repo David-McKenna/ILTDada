@@ -108,10 +108,12 @@ int main(int argc, char *argv[]) {
 		config[port].key = config[0].key + offset * port;
 		config[port].params = &(params[port]);
 
-		ringbuffer[port] = IPCIO_INIT;
-		header[port] = IPCIO_INIT;
-		config[port].ringbuffer = &(ringbuffer[port]);
-		config[port].header = &(header[port]);
+		if (packets == 0) {
+			ringbuffer[port] = IPCIO_INIT;
+			header[port] = IPCIO_INIT;
+			config[port].ringbuffer = &(ringbuffer[port]);
+			config[port].header = &(header[port]);
+		}
 		config[port].nbufs = 32;
 		config[port].bufsz = 4 * PACKET_SIZE * config[0].packetsPerIteration;
 	}

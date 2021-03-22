@@ -86,6 +86,7 @@ typedef struct ilt_dada_config {
 	int checkInitParameters;
 	int checkInitData;
 	int checkParameters;
+	int writesPerStatusLog;
 	int cleanupTimeout;
 
 

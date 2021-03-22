@@ -32,6 +32,7 @@ ilt_dada_config ilt_dada_config_default = {
 	.checkInitParameters = 1,
 	.checkInitData = 1,
 	.checkParameters = CHECK_FIRST_LAST,
+	.writesPerStatusLog = 256,
 	.cleanupTimeout = 10.0,
 
 	// Observation configuration
@@ -298,6 +299,7 @@ int ilt_dada_initialise_ringbuffer(ilt_dada_config *config) {
 
 	// Initialise a multilog instance for logging
 	config->multilog = multilog_open(config->programName, config->syslog);
+	multilog_add(config->multilog, stdout);
 
 	if (config->multilog == NULL) {
 		fprintf(stderr, "ERROR: Failed to initlaise multilog struct on port %d, exiting.\n", config->portNum);
@@ -424,7 +426,8 @@ int ilt_dada_check_network(ilt_dada_config *config) {
 	config->packetSize = (int) (UDPHDRLEN + buffer[6] * buffer[7] * ((float) UDPNPOL / (source->bitMode ? source->bitMode : 0.5)));
 
 
-	config->currentPacket = beamformed_packno(*((unsigned int*) &(buffer[8])), *((unsigned int*) &(buffer[12])), source->clockBit); 
+	// Offset by 1 to account for the fact we will read this packet again (since we used MSG_PEEK)
+	config->currentPacket = beamformed_packno(*((unsigned int*) &(buffer[8])), *((unsigned int*) &(buffer[12])), source->clockBit) - 1; 
 
 	return 0;
 }
@@ -508,53 +511,26 @@ int ilt_dada_operate(ilt_dada_config *config) {
 												.minReads = 1,
 												.bytesWritten = 0
 											};
-	params.finalPacket = config->startPacket;
+	params.finalPacket = config->endPacket;
 	config->params = &params;
 
 	if (ilt_data_operate_prepare(config) < 0) {
 		return -1;
 	} 
 
-	// Consume first packet
-	if (recvfrom(config->sockfd, &(config->params->packetBuffer[0]), MAX_UDP_LEN, MSG_PEEK, NULL, NULL) == -1) {
-		fprintf(stderr, "ERROR: Unable to peek at first packet for main operation (errno %d, %s).", errno, strerror(errno));
-		ilt_dada_operate_cleanup(config);
-		return -2;
-	}
-
 	if (ilt_dada_check_network(config) < 0) {
 		ilt_dada_operate_cleanup(config);
 		return -1;
 	}
 
-	config->params->finalPacket = config->startPacket;
-
-
-
-
-	// If we haven't passed the start of the observation, loop until we start
+	// Warn the user if we are starting late
 	if (config->currentPacket > config->startPacket) {
 		fprintf(stderr, "WARNING: We are already past the observation start time on port %d.\n", config->portNum);
-	} else if (ilt_dada_operate_loop(config) < 0) {
-		ilt_dada_operate_cleanup(config);
-		return -1;
-	}
+		// Update the current packet so that we reflect the missed data in the packet loss
+		config->currentPacket = config->startPacket;
+	} 
 
-	// Print debug information about the startup period
-	ilt_dada_packet_comments(config);
-
-
-	// Mark the data as ready to be consumed
-	//if (ipcio_start(config->ringbuffer, config->params->bytesWritten) < 0) {
-	//return -1;
-	//}
-
-	// Reset loop variables for main observation
-	config->params->finalPacket = config->endPacket;
-	config->params->packetsSeen = 0;
-	config->params->packetsExpected = 0;
-
-	// Read new data from the until the observation ends
+	// Read new data from the port until the observation ends
 	if (ilt_dada_operate_loop(config) < 0) {
 		ilt_dada_operate_cleanup(config);
 		return -1;
@@ -563,16 +539,7 @@ int ilt_dada_operate(ilt_dada_config *config) {
 	// Print debug information about the observing run
 	ilt_dada_packet_comments(config);
 
-	printf("%d\n", ipcbuf_get_reader_conn((ipcbuf_t *) config->ringbuffer));
-	// Mark the data as completed
-	if (ipcio_stop(config->ringbuffer) < 0) {
-		fprintf(stderr, "ERROR: Failed to mark end of data on port %d, exiting.\n", config->portNum);
-		ilt_dada_operate_cleanup(config);
-		return -1;
-	}
-	printf("%d\n", ipcbuf_get_reader_conn((ipcbuf_t *) config->ringbuffer));
-
-	// Cleanup buffers
+	// Cleanup network and ringbuffer allocations
 	ilt_dada_operate_cleanup(config);
 
 	// Clean exit
@@ -596,7 +563,7 @@ int ilt_dada_operate(ilt_dada_config *config) {
  * @return     0: Success, -1: Early Exit / Failure
  */
 int ilt_dada_operate_loop(ilt_dada_config *config) {
-	int readPackets;
+	int readPackets, localLoops = 0;
 	long finalPacketOffset = (config->packetsPerIteration - 1) * config->packetSize;
 	long lastPacket;
 	size_t writeBytes, writtenBytes;
@@ -652,10 +619,19 @@ int ilt_dada_operate_loop(ilt_dada_config *config) {
 		config->currentPacket = lastPacket;
 		config->params->minReads -= 1;
 
-		if (config->currentPacket < config->params->finalPacket && config->params->minReads < 0) {
+		localLoops++;
+		if (localLoops > config->writesPerStatusLog) {
+			localLoops = 0;
+			ilt_dada_packet_comments(config);
+			config->params->packetsLastSeen = 0;
+			config->params->packetsLastExpected = 0;
+		}
+
+		if (config->currentPacket > config->params->finalPacket && config->params->minReads < 0) {
 			config->params->minReads = 2 * config->bufsz / (config->packetsPerIteration * config->packetSize);
 		}
 	}
+
 
 	return 0;
 }
@@ -733,7 +709,15 @@ void ilt_dada_operate_cleanup(ilt_dada_config *config) {
  * @param      config  The recording configuration
  */
 void ilt_dada_packet_comments(ilt_dada_config *config) {
-	;
+	char messageBlock[6][2048];
+
+	sprintf(messageBlock[0], "Port %d\tObservation %.1f%% Complete\t\t\tCurrent Packet %ld\n", config->portNum, 100.0f * (float) (config->currentPacket - config->startPacket) / (float) (config->endPacket - config->startPacket), config->currentPacket);
+	sprintf(messageBlock[1], "Packets\t\tExpected\t\tSeen\t\t\tMissed\n");
+	sprintf(messageBlock[2], "N (Current)\t%ld\t\t\t%ld\t\t\t%ld\n", config->params->packetsLastExpected, config->params->packetsLastSeen, config->params->packetsLastExpected - config->params->packetsLastSeen);
+	sprintf(messageBlock[3], "%% (Current)\t...\t\t\t%.1f\t\t\t%.1f\n", 100.0f * (float) (config->params->packetsLastSeen) / (float) (config->params->packetsLastExpected), 100.0f * (float) (config->params->packetsLastExpected - config->params->packetsLastSeen) / (float) (config->params->packetsLastExpected));
+	sprintf(messageBlock[4], "N (Total)\t%ld\t\t\t%ld\t\t\t%ld\n", config->params->packetsExpected, config->params->packetsSeen, config->params->packetsExpected - config->params->packetsSeen);
+	sprintf(messageBlock[5], "%% (Total)\t...\t\t\t%.1f\t\t\t%.1f\n", 100.0f * (float) (config->params->packetsSeen) / (float) (config->params->packetsExpected), 100.0f * (float) (config->params->packetsExpected - config->params->packetsSeen) / (float) (config->params->packetsExpected));
+	multilog(config->multilog, 6, "%s%s%s%s%s%s", messageBlock[0], messageBlock[1], messageBlock[2], messageBlock[3], messageBlock[4], messageBlock[5]);
 }
 
 
@@ -756,25 +740,25 @@ void ilt_dada_cleanup(ilt_dada_config *config) {
 	}
 
 
-	// Wait for readers to finish up and exit, or timeout
-	float totalSleep = 0.0;
-	printf("%d\n", ipcbuf_get_reader_conn((ipcbuf_t *) config->ringbuffer));
+	// CLose the ringbuffer writers
+	if (config->ringbuffer != NULL && config->header != NULL) {
+		ipcio_close(config->ringbuffer);
+		ipcio_close(config->header);
 
-	while (totalSleep < config->cleanupTimeout) {
-		printf("%d\n", ipcbuf_get_reader_conn((ipcbuf_t *) config->ringbuffer));
-		if (ipcbuf_get_reader_conn((ipcbuf_t *) config->ringbuffer) != 0) {
-			break;
+		// Wait for readers to finish up and exit, or timeout (ipcio_read can hand if it requests data past the EOD point)
+		float totalSleep = 0.0;
+
+		while (totalSleep < config->cleanupTimeout) {
+			if (ipcbuf_get_reader_conn((ipcbuf_t *) config->ringbuffer) != 0) {
+				break;
+			}
+
+			usleep(1000 * 5);
+			totalSleep += 0.005;
 		}
 
-		usleep(1000 * 5);
-		totalSleep += 0.005;
+		// Destroy the ringbuffer instances
+		ipcio_destroy(config->ringbuffer);
+		ipcio_destroy(config->header);
 	}
-	printf("%d\n", ipcbuf_get_reader_conn((ipcbuf_t *) config->ringbuffer));
-
-	// Close, disconnect and destroy the ringbuffer
-	ipcio_close(config->ringbuffer);
-	ipcio_close(config->header);
-
-	ipcio_destroy(config->ringbuffer);
-	ipcio_destroy(config->header);
 }
