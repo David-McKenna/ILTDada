@@ -537,7 +537,8 @@ int ilt_dada_operate(ilt_dada_config *config) {
 	}
 
 	// Print debug information about the observing run
-	ilt_dada_packet_comments(config);
+	ilt_dada_packet_comments(config->multilog, config->portNum, config->currentPacket, config->startPacket, config->endPacket, config->params->packetsLastExpected, config->params->packetsLastSeen, config->params->packetsExpected, config->params->packetsSeen);
+
 
 	// Cleanup network and ringbuffer allocations
 	ilt_dada_operate_cleanup(config);
@@ -622,7 +623,8 @@ int ilt_dada_operate_loop(ilt_dada_config *config) {
 		localLoops++;
 		if (localLoops > config->writesPerStatusLog) {
 			localLoops = 0;
-			ilt_dada_packet_comments(config);
+			#pragma omp task
+			ilt_dada_packet_comments(config->multilog, config->portNum, config->currentPacket, config->startPacket, config->endPacket, config->params->packetsLastExpected, config->params->packetsLastSeen, config->params->packetsExpected, config->params->packetsSeen);
 			config->params->packetsLastSeen = 0;
 			config->params->packetsLastExpected = 0;
 		}
@@ -708,16 +710,16 @@ void ilt_dada_operate_cleanup(ilt_dada_config *config) {
  *
  * @param      config  The recording configuration
  */
-void ilt_dada_packet_comments(ilt_dada_config *config) {
+void ilt_dada_packet_comments(multilog_t *mlog, int portNum, long currentPacket, long startPacket, long endPacket, long packetsLastExpected, long packetsLastSeen, long packetsExpected, long packetsSeen) {
 	char messageBlock[6][2048];
 
-	sprintf(messageBlock[0], "Port %d\tObservation %.1f%% Complete\t\t\tCurrent Packet %ld\n", config->portNum, 100.0f * (float) (config->currentPacket - config->startPacket) / (float) (config->endPacket - config->startPacket), config->currentPacket);
+	sprintf(messageBlock[0], "Port %d\tObservation %.1f%% Complete\t\t\tCurrent Packet %ld\n", portNum, 100.0f * (float) (currentPacket - startPacket) / (float) (endPacket - startPacket), currentPacket);
 	sprintf(messageBlock[1], "Packets\t\tExpected\t\tSeen\t\t\tMissed\n");
-	sprintf(messageBlock[2], "N (Current)\t%ld\t\t\t%ld\t\t\t%ld\n", config->params->packetsLastExpected, config->params->packetsLastSeen, config->params->packetsLastExpected - config->params->packetsLastSeen);
-	sprintf(messageBlock[3], "%% (Current)\t...\t\t\t%.1f\t\t\t%.1f\n", 100.0f * (float) (config->params->packetsLastSeen) / (float) (config->params->packetsLastExpected), 100.0f * (float) (config->params->packetsLastExpected - config->params->packetsLastSeen) / (float) (config->params->packetsLastExpected));
-	sprintf(messageBlock[4], "N (Total)\t%ld\t\t\t%ld\t\t\t%ld\n", config->params->packetsExpected, config->params->packetsSeen, config->params->packetsExpected - config->params->packetsSeen);
-	sprintf(messageBlock[5], "%% (Total)\t...\t\t\t%.1f\t\t\t%.1f\n", 100.0f * (float) (config->params->packetsSeen) / (float) (config->params->packetsExpected), 100.0f * (float) (config->params->packetsExpected - config->params->packetsSeen) / (float) (config->params->packetsExpected));
-	multilog(config->multilog, 6, "%s%s%s%s%s%s", messageBlock[0], messageBlock[1], messageBlock[2], messageBlock[3], messageBlock[4], messageBlock[5]);
+	sprintf(messageBlock[2], "N (Current)\t%ld\t\t\t%ld\t\t\t%ld\n", packetsLastExpected, packetsLastSeen, packetsLastExpected - packetsLastSeen);
+	sprintf(messageBlock[3], "%% (Current)\t...\t\t\t%.1f\t\t\t%.1f\n", 100.0f * (float) (packetsLastSeen) / (float) (packetsLastExpected), 100.0f * (float) (packetsLastExpected - packetsLastSeen) / (float) (packetsLastExpected));
+	sprintf(messageBlock[4], "N (Total)\t%ld\t\t\t%ld\t\t\t%ld\n", packetsExpected, packetsSeen, packetsExpected - packetsSeen);
+	sprintf(messageBlock[5], "%% (Total)\t...\t\t\t%.1f\t\t\t%.1f\n", 100.0f * (float) (packetsSeen) / (float) (packetsExpected), 100.0f * (float) (packetsExpected - packetsSeen) / (float) (packetsExpected));
+	multilog(mlog, 6, "%s%s%s%s%s%s", messageBlock[0], messageBlock[1], messageBlock[2], messageBlock[3], messageBlock[4], messageBlock[5]);
 }
 
 

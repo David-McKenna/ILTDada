@@ -8,7 +8,7 @@ CLI_VER = 0.1
 
 
 OPT_ARCH ?= "native"
-CFLAGS += -W -Wall -Ofast -march=$(OPT_ARCH) -mtune=$(OPT_ARCH) -fPIC -funswitch-loops
+CFLAGS += -W -Wall -Ofast -march=$(OPT_ARCH) -mtune=$(OPT_ARCH) -fPIC -funswitch-loops -fopenmp
 #CFLAGS += -g -fsanitize=address
 
 

@@ -143,7 +143,7 @@ int ilt_dada_check_header(ilt_dada_config *config, unsigned char* buffer);
 
 int ilt_dada_operate(ilt_dada_config *config);
 int ilt_dada_operate_loop(ilt_dada_config *config);
-void ilt_dada_packet_comments(ilt_dada_config *config);
+void ilt_dada_packet_comments(multilog_t *multilog, int portNum, long currentPacket, long startPacket, long endPacket, long packetsLastExpected, long packetsLastSeen, long packetsExpected, long packetsSeen);
 
 
 
