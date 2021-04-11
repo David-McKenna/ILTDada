@@ -207,12 +207,12 @@ int ilt_dada_initialise_port(ilt_dada_config *config) {
 	// 	https://man7.org/linux/man-pages/man2/recvmmsg.2.html#bugs 
 	// 	I wasn't able to confirm that this actually worked, and ran into other issues with timeouts
 	// 	so this is comments out for now.
-	//const struct timeval timeout =  { .tv_sec = (int) (config->portTimeout / 1 ), .tv_usec = (int) ((config->portTimeout - ((int) config->portTimeout)) * 1e6) };
-	//if (setsockopt(sockfd_init, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) == -1) {
-	//	fprintf(stderr, "ERROR: Failed to set timeout on port %d (errno%d: %s).\n", config->portNum, errno, strerror(errno));
-	//	cleanup_initialise_port(serverInfo, sockfd_init);
-	//	return -1;
-	//}
+	const struct timeval timeout =  { .tv_sec = (int) (config->portTimeout / 1 ), .tv_usec = (int) ((config->portTimeout - ((int) config->portTimeout)) * 1e6) };
+	if (setsockopt(sockfd_init, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) == -1) {
+		fprintf(stderr, "ERROR: Failed to set timeout on port %d (errno%d: %s).\n", config->portNum, errno, strerror(errno));
+		cleanup_initialise_port(serverInfo, sockfd_init);
+		return -1;
+	}
 
 	// Cleanup the addrinfo linked list before returning
 	cleanup_initialise_port(serverInfo, -1);
@@ -443,9 +443,9 @@ int ilt_dada_check_header(ilt_dada_config *config, unsigned char* buffer) {
 			return -1;
 		}
 
-		// Check the CEP header version (maybe require == 3?)
-		if (buffer[0] < UDPCURVER) {
-			fprintf(stderr, "ERROR: UDP version on port %d appears malformed (RSP Version less than 3, %d).\n", config->portNum, (unsigned char) buffer[0] < UDPCURVER);
+		// Check the CEP header version
+		if (buffer[0] != UDPCURVER) {
+			fprintf(stderr, "ERROR: UDP version on port %d appears malformed (RSP Version is not 3, %d).\n", config->portNum, (unsigned char) buffer[0] < UDPCURVER);
 			return -1;
 		}
 
@@ -528,7 +528,15 @@ int ilt_dada_operate(ilt_dada_config *config) {
 		fprintf(stderr, "WARNING: We are already past the observation start time on port %d.\n", config->portNum);
 		// Update the current packet so that we reflect the missed data in the packet loss
 		config->currentPacket = config->startPacket;
-	} 
+	} else {
+		// Sleep until we're 5 seconds from the desired start time
+		struct timespec sleep = { 0 };
+		int sleepTime = (config->startPacket - config->currentPacket) / (clock160MHzPacketRate * (1 - config->obsClockBit) + clock200MHzPacketRate * config->obsClockBit);
+		if (sleepTime > 5) {
+			sleep.tv_sec = sleepTime;
+			nanosleep(&sleep, &sleep);
+		}
+	}
 
 	// Read new data from the port until the observation ends
 	if (ilt_dada_operate_loop(config) < 0) {
@@ -569,6 +577,30 @@ int ilt_dada_operate_loop(ilt_dada_config *config) {
 	long lastPacket;
 	size_t writeBytes, writtenBytes;
 
+
+	// If we're starting early or the buffer started filling early, consume data until we reach the starting packet
+	while (config->currentPacket < config->startPacket) {
+		readPackets = recvmmsg(config->sockfd, config->params->msgvec, config->packetsPerIteration, config->recvflags, config->params->timeout);
+		lastPacket = beamformed_packno(*((unsigned int*) &(config->params->packetBuffer[finalPacketOffset + 8])), *((unsigned int*) &(config->params->packetBuffer[finalPacketOffset + 12])), ((lofar_source_bytes*) &(config->params->packetBuffer[1]))->clockBit);
+
+		if (lastPacket >= config->startPacket) {
+			readPackets = lastPacket - config->startPacket;
+			writeBytes = readPackets * config->packetSize;
+			writtenBytes = ipcio_write(config->ringbuffer, &(config->params->packetBuffer[(config->packetsPerIteration - readPackets) * config->packetSize]), writeBytes);
+
+			if (writtenBytes != writeBytes) {
+				fprintf(stderr, "WARNING Port %d: Tried to write %ld bytes to buffer but only wrote %ld.\n", config->portNum, writeBytes, writtenBytes);
+			}
+
+			config->params->bytesWritten += writtenBytes;
+			config->params->packetsSeen += readPackets;
+			config->params->packetsExpected += lastPacket - config->currentPacket;
+			config->params->packetsLastSeen += readPackets;
+			config->params->packetsLastExpected += lastPacket - config->currentPacket;
+		}
+
+		config->currentPacket = lastPacket;
+	}
 
 	// While we still have data to record,
 	while (config->currentPacket < config->params->finalPacket || config->params->minReads > 0) {
@@ -630,7 +662,11 @@ int ilt_dada_operate_loop(ilt_dada_config *config) {
 		}
 
 		if (config->currentPacket > config->params->finalPacket && config->params->minReads < 0) {
-			config->params->minReads = 2 * config->bufsz / (config->packetsPerIteration * config->packetSize);
+			if (ipcio_stop(config->ringbuffer) < 0) {
+				// No point in returning early, just finish up.	
+			}
+			// Read at least one last buffer of data, then exit.
+			config->params->minReads = config->bufsz / (config->packetsPerIteration * config->packetSize);
 		}
 	}
 
@@ -688,6 +724,7 @@ int ilt_data_operate_prepare(ilt_dada_config *config) {
 
 	return 0;
 }
+
 
 /**
  * @brief      Cleanup the memory allocated to receive packets via recvmmsg
