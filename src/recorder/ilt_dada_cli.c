@@ -16,8 +16,8 @@ int main(int argc, char  *argv[]) {
 
 	char inputOpt;
 	int bufferMul = 64, clock = 1;
-	float targetSeconds = 5.0;
-	char startTime[1024] = "", endTime[1024] = "";
+	float targetSeconds = 5.0f, obsSeconds = 60.0f;
+	char startTime[DEF_STR_LEN] = "", endTime[DEF_STR_LEN] = "";
 
 	while ((inputOpt = getopt(argc, argv, "cp:k:n:m:s:t:S:T:r:")) != -1) {
 		switch (inputOpt) {
@@ -48,7 +48,7 @@ int main(int argc, char  *argv[]) {
 				break;
 
 			case 't':
-				cfg.endPacket = (long) atof(optarg) * 12207;
+				obsSeconds = atof(optarg);
 				break;
 
 			case 'S':
@@ -69,27 +69,27 @@ int main(int argc, char  *argv[]) {
 		}
 	}
 
+	// If we haven't been passed a time, set it to the current time.
 	if (strcmp(startTime, "") == 0) {
 		time_t currTime;
 		time(&currTime);
-		// Subtract a second so that we will always start recording immediately
-		currTime -= 1;
 		strftime(startTime, sizeof startTime, "%Y-%m-%dT%H:%M:%S", gmtime(&currTime));
+
+		printf("INFO: Input time not set, setting start time to %s\n.", startTime);
 	}
 
+	// Convert the start time to a packet
 	cfg.startPacket = getStartingPacket(startTime, clock);
 
-	if (cfg.endPacket > 0) {
-		if (strcmp(endTime, "") != 0) {
-			fprintf(stderr, "WARNING: Prioritising observation length (%f) over end time stamp (%s).\n", (float) cfg.endPacket / 12207, endTime);
-		}
-		
-		cfg.endPacket += cfg.startPacket;
-	} else if (strcmp(endTime, "") != 0) {
+	if (strcmp(endTime, "") != 0) {
 		cfg.endPacket = getStartingPacket(endTime, clock);
-	}
 
-	printf("%ld, %ld\n", cfg.startPacket, cfg.endPacket);
+		if (obsSeconds != 60.0f) {
+			fprintf(stderr, "WARNING: Ignoring input observation length (%f) and using input end time instead (%s).\n", obsSeconds, endTime);
+		}
+	} else {
+		cfg.endPacket = cfg.startPacket + (obsSeconds * (clock160MHzPacketRate * (1 - clockBit) + clock200MHzPacketRate * clockBit));
+	}
 
 	cfg.bufsz = bufferMul * cfg.packetsPerIteration * MAX_UDP_LEN;
 	
@@ -103,15 +103,10 @@ int main(int argc, char  *argv[]) {
 
 	printf("Preparing ILTDada to record data from port %d, consuming %d packets per iteration.\n", cfg.portNum, cfg.packetsPerIteration);
 	printf("Ring buffer on key  %d (ptr %x) will require %ld MB (%ld GB) of memory to hold ~%ld seconds of data in %" PRIu64 " buffers.\n", cfg.key, cfg.key, cfg.bufsz * cfg.nbufs >> 20, cfg.bufsz * cfg.nbufs >> 30, cfg.packetsPerIteration * cfg.nbufs / 12207, cfg.nbufs);
+	printf("Start/End packets will be %ld and %ld.\n\n", cfg.startPacket, cfg.endPacket);
 
 	printf("\n\nInitialising UDP port...\n");
 	if (ilt_dada_initialise_port(&cfg) < 0) {
-		printf("Exiting.\n");
-		return 1;
-	}
-
-	printf("Checking initial packets...\n");
-	if (ilt_dada_check_network(&cfg) < 0) {
 		printf("Exiting.\n");
 		return 1;
 	}
@@ -122,12 +117,12 @@ int main(int argc, char  *argv[]) {
 		return 1;
 	}
 
-	printf("Starting recording...\n");
+	printf("Preparing to recording...\n");
 	if (ilt_dada_operate(&cfg) < 0) {
 		printf("Exiting.\n");
 		return 1;
 	}
 
-	printf("Cleaning up.\n");
+	printf("Observation finished, cleaning up.\n");
 	ilt_dada_cleanup(&cfg);
 }
