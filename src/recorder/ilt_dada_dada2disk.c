@@ -2,6 +2,11 @@
 #include "lofar_cli_meta.h"
 #include "lofar_udp_io.h"
 
+
+void CLICleanup() {
+
+}
+
 int main(int argc, char  *argv[]) {
 	
 	lofar_udp_config *config = calloc(1, sizeof(lofar_udp_config));
