@@ -7,6 +7,10 @@ void CLICleanup() {
 
 }
 
+void helpMessages() {
+
+}
+
 int main(int argc, char  *argv[]) {
 	
 	lofar_udp_config *config = calloc(1, sizeof(lofar_udp_config));
