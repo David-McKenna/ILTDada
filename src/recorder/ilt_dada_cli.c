@@ -88,7 +88,7 @@ int main(int argc, char  *argv[]) {
 			fprintf(stderr, "WARNING: Ignoring input observation length (%f) and using input end time instead (%s).\n", obsSeconds, endTime);
 		}
 	} else {
-		cfg.endPacket = cfg.startPacket + (obsSeconds * (clock160MHzPacketRate * (1 - clockBit) + clock200MHzPacketRate * clockBit));
+		cfg.endPacket = cfg.startPacket + (obsSeconds * (clock160MHzPacketRate * (1 - clock) + clock200MHzPacketRate * clock));
 	}
 
 	cfg.bufsz = bufferMul * cfg.packetsPerIteration * MAX_UDP_LEN;
