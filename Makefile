@@ -6,10 +6,13 @@ LIB_VER = 0.1
 LIB_VER_MINOR = 0
 CLI_VER = 0.1
 
+CC ?= "cc"
+CXX ?= "c++"
+
 
 OPT_ARCH ?= "native"
 CFLAGS += -W -Wall -Ofast -march=$(OPT_ARCH) -mtune=$(OPT_ARCH) -fPIC -funswitch-loops -fopenmp
-#CFLAGS += -g -fsanitize=address
+CFLAGS += -g -ggdb -fsanitize=address
 
 
 DEFINES += -DVERSION=$(LIB_VER) -DVERSION_MINOR=$(LIB_VER_MINOR) -DVERSIONCLI=$(CLI_VER)
@@ -32,11 +35,11 @@ PREFIX ?= /usr/local
 all: cli test-cli
 
 cli: $(CLI_OBJECTS)
-	$(CC) $(CFLAGS) $(OBJECTS) src/recorder/ilt_dada_cli.o -o ./ilt_dada $(LFLAGS)
-	$(CC) $(CFLAGS) $(OBJECTS) src/recorder/ilt_dada_dada2disk.o -o ./ilt_dada_dada2disk $(LFLAGS)
+	$(CXX) $(CFLAGS) $(OBJECTS) src/recorder/ilt_dada_cli.o -o ./ilt_dada $(LFLAGS)
+	$(CXX) $(CFLAGS) $(OBJECTS) src/recorder/ilt_dada_dada2disk.o -o ./ilt_dada_dada2disk $(LFLAGS)
 
 test-cli: $(TEST_CLI_OBJECTS) 
-	$(CC) $(CFLAGS) $(TEST_CLI_OBJECTS) -o ./ilt_dada_fill_buffer $(LFLAGS)
+	$(CXX) $(CFLAGS) $(TEST_CLI_OBJECTS) -o ./ilt_dada_fill_buffer $(LFLAGS)
 
 
 # Install CLI, headers, library

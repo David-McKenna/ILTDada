@@ -2,7 +2,7 @@
 #include <limits.h>
 
 
-ilt_dada_operate_params ilt_dada_operate_params_default = {
+const ilt_dada_operate_params ilt_dada_operate_params_default = {
 	.packetBuffer = NULL,
 	.msgvec = NULL,
 	.iovecs = NULL,
@@ -13,18 +13,17 @@ ilt_dada_operate_params ilt_dada_operate_params_default = {
 	.packetsLastSeen = 0,
 	.packetsLastExpected = 0,
 	.finalPacket = -1,
-	.minReads = 1,
 	.bytesWritten = 0
 };
 
-ilt_dada_config ilt_dada_config_default = {
+const ilt_dada_config ilt_dada_config_default = {
 
 	// UDP configuration
 	.portNum = -1,
 	.portBufferSize = -1,
 	.portPriority = 6,
-	.portTimeout = 30,
 	.packetSize = MAX_UDP_LEN,
+	.portTimeout = 30,
 	.recvflags = 0,
 
 
@@ -33,34 +32,50 @@ ilt_dada_config ilt_dada_config_default = {
 	.checkInitData = 1,
 	.checkParameters = CHECK_FIRST_LAST,
 	.writesPerStatusLog = 256,
-	.cleanupTimeout = 10.0,
 
 	// Observation configuration
 	.startPacket = -1,
 	.endPacket = -1,
+	.currentPacket = -1,
 	.packetsPerIteration = 256, // ~0.67 seconds of data
 	.obsClockBit= -1,
 	.obsBitMode = -1,
 
 
-	// PSRSDADA configuration
-	.key = 0,
-	.nbufs = 0,
-	.bufsz = 0,
-	.num_readers = 1,
-	.syslog = 0,
-	.programName = "ILTDada",
-
 
 	// PSRDADA working variables
 	.sockfd = -1,
 	.headerText = "",
-	.currentPacket = -1,
-	.ringbuffer = NULL,
-	.header = NULL,
-	.multilog = NULL,
-	.params = NULL
+
+	.params = NULL,
+	.io = NULL,
+	.io_setup = 0,
 };
+
+ilt_dada_config* ilt_dada_init() {
+	ilt_dada_config *config = calloc(1, sizeof(ilt_dada_config));
+
+	if (config == NULL) {
+		fprintf(stderr, "ERROR: Failed to allocate memory for configuration struct, exiting.\n");
+		return NULL;
+	} 
+
+	*(config) = ilt_dada_config_default;
+
+	config->params = calloc(1, sizeof(ilt_dada_operate_params));
+	config->io = calloc(1, sizeof(lofar_udp_io_write_config));
+
+	if (config->params == NULL || config->io == NULL) {
+		fprintf(stderr, "ERROR: Failed to allocate memory for configuration struct components, exiting.\n");
+		return NULL;
+	}
+
+	*(config->io) = lofar_udp_io_write_config_default;
+	*(config->params) = ilt_dada_operate_params_default;
+	config->io->readerType = DADA_ACTIVE;
+
+	return config;
+}
 
 /**
  * @brief      Initialise a UDP network docket on the gien port number and
@@ -145,7 +160,6 @@ int ilt_dada_initialise_port(ilt_dada_config *config) {
 		return -1;
 	}
 
-	printf("Buffer: %ld, %ld, %ldMB\n", optVal, optVal<<20, config->portBufferSize);
 	if (optVal < (2 * config->portBufferSize - 1)) {	
 		if (setsockopt(sockfd_init, SOL_SOCKET, SO_RCVBUF, &(config->portBufferSize), sizeof(config->portBufferSize)) == -1) {
 			fprintf(stderr, "ERROR: Failed to adjust buffer size on port %d (errno%d: %s).\n", config->portNum, errno, strerror(errno));
@@ -257,7 +271,7 @@ void cleanup_initialise_port(struct addrinfo *serverInfo, int sockfd_init) {
  * @return     0 (success) / -1 (failure)
  */
 int ilt_dada_check_config(ilt_dada_config *config) {
-
+	// TODO
 	return 0;
 }
 
@@ -268,110 +282,32 @@ int ilt_dada_check_config(ilt_dada_config *config) {
  *
  * @return     0 (success) / -1 (failure)
  */
-int ilt_dada_initialise_ringbuffer(ilt_dada_config *config) {
+int ilt_dada_setup(ilt_dada_config *config ,int setup_io) {
 
 	if (ilt_dada_check_config(config) < 0) {
 		return -1;
 	}
 
-	if (config->ringbuffer != NULL) {
-		fprintf(stderr, "ERROR: Port %d attempted to initialsie a ringbuffer when a ringbuffer was already initialised, exiting.\n", config->portNum);
+	if (ilt_dada_initialise_port(config) < 0) {
 		return -1;
 	}
 
-	if (config->header != NULL) {
-		fprintf(stderr, "ERROR: Port %d attempted to initialsie a header ringbuffer when a header ringbuffer was already initialised, exiting.\n", config->portNum);
+	if (ilt_dada_check_network(config) < 0) {
 		return -1;
 	}
 
-	if (config->multilog != NULL) {
-		fprintf(stderr, "ERROR: Port %d attempted to initialise a ringbuffer when a multilog instance was already initialised, exiting.\n", config->portNum);
-		return -1;
-	}
-
-	// Initialise the ringbuffer/header structs
-	static ipcio_t ringbuffer;
-	static ipcio_t header;
-	ringbuffer = IPCIO_INIT;
-	header = IPCIO_INIT;
-	config->ringbuffer = &ringbuffer;
-	config->header = &header;
-
-	// Initialise a multilog instance for logging
-	config->multilog = multilog_open(config->programName, config->syslog);
-	multilog_add(config->multilog, stdout);
-
-	if (config->multilog == NULL) {
-		fprintf(stderr, "ERROR: Failed to initlaise multilog struct on port %d, exiting.\n", config->portNum);
-		return -1;
-	}
-
-	// Initialise the ringbuffer, exit on failure
-	if (ilt_dada_initialise_ringbuffer_hdu(config) < 0) {
-		return -1;
+	if (setup_io) {
+		// Initialise the ringbuffer, exit on failure
+		if (lofar_udp_io_write_setup(config->io, 0) < 0) {
+			return -1;
+		}
+		config->io_setup = 1;
 	}
 
 	return 0;
 
 }
 
-/**
- * @brief      Initialise a PSRDADA ringbuffer
- *
- * @param      ringbuffer  The ringbuffer struct
- * @param      config      The ringbuffer configuration
- *
- * @return     0 (success) / -1 (failure) / -2 (unrecoverable failure)
- */
-int ilt_dada_initialise_ringbuffer_hdu(ilt_dada_config *config) {
-	
-	// Create  and connect to the ringbuffer instance
-	if (ipcio_create(config->ringbuffer, config->key, config->nbufs, config->bufsz, config->num_readers) < 0) {
-		// ipcio_create(...) prints error to stderr, so we just need to exit.
-		return -2;
-	}
-
-	// Create  and connect to the header buffer instance
-	if (ipcio_create(config->header, config->key + 1, 1, DADA_DEFAULT_HEADER_SIZE, config->num_readers) < 0) {
-		// ipcio_create(...) prints error to stderr, so we just need to exit.
-		return -2;
-	}
-
-	// Open the ringbuffer instance as the primary writer
-	if (ipcio_open(config->ringbuffer, 'W') < 0) {
-		// ipcio_open(...) prints error to stderr, so we just need to exit.
-		return -2;
-	}
-
-	// Open the header buffer instance as the primary writer
-	if (ipcio_open(config->header, 'W') < 0) {
-		// ipcio_open(...) prints error to stderr, so we just need to exit.
-		return -2;
-	}
-
-
-	// Mark the data as being from beofre the true start of the observation
-	// Disable for the time being, I ran into issues trying to mark SOD later
-	/*
-	ipcbuf_lock_write((ipcbuf_t *) config->ringbuffer);
-	if (ipcbuf_disable_sod((ipcbuf_t *) config->ringbuffer) < 0) {
-		// ipcbuf_disable_sod(...) prints rttot yo stderr, so we just need to exit.
-		return -1;
-	}
-	ipcbuf_unlock_write((ipcbuf_t *)config->ringbuffer);
-	*/
-
-	// This now requires root permissions; skip for the moment.
-	/*
-	// Lock the ringbuffer into physical RAM to prevent it being swap'd out
-	if (ipcbuf_lock(ringbuffer) < 0) {
-		// ipcbuf_lock(...) prints error to stderr, but let's warn that this is lik
-		return -1;
-	}
-	*/
-
-	return 0;
-}
 
 /**
  * @brief      Verify the provided configuration matches the packets we're
@@ -476,6 +412,8 @@ int ilt_dada_check_header(ilt_dada_config *config, unsigned char* buffer) {
 		}
 
 		// Check that the clock and bitmodes are the expected values
+		// No logner checked, using these as the source of the data
+		/*
 		if (source->clockBit != config->obsClockBit && config->obsClockBit != (unsigned char) -1) {
 			fprintf(stderr, "ERROR: RSP reports a different clock than expected on port %d (expected %d, got %d).", config->portNum, config->obsClockBit, source->clockBit);
 			return -2;
@@ -484,6 +422,7 @@ int ilt_dada_check_header(ilt_dada_config *config, unsigned char* buffer) {
 			fprintf(stderr, "ERROR: Bitmode mismatch on port %d (expected %d, got %d).", config->portNum, config->obsBitMode, source->bitMode);
 			return -2;
 		}
+		*/
 
 		// Make sure the padding values haven't been set
 		if (source->padding0 != 0 || source->padding1 != 0) {
@@ -499,6 +438,14 @@ int ilt_dada_check_header(ilt_dada_config *config, unsigned char* buffer) {
 
 int ilt_dada_operate(ilt_dada_config *config) {
 
+	if (!config->io_setup) {
+		// Initialise the ringbuffer, exit on failure
+		if (lofar_udp_io_write_setup(config->io, 0) < 0) {
+			return -1;
+		}
+		config->io_setup = 1;
+	}
+
 	// Timeout apparently is relative to the socket being oepned, so it's useless.
 	//static struct timespec timeout;
 	//timeout.tv_sec = (int) config->portTimeout;
@@ -508,16 +455,17 @@ int ilt_dada_operate(ilt_dada_config *config) {
 												.timeout = NULL, 
 												.packetsSeen = 0,
 												.packetsExpected = 0,
-												.minReads = 1,
 												.bytesWritten = 0
 											};
 	params.finalPacket = config->endPacket;
-	config->params = &params;
+	*(config->params) = params;
 
+	printf("Prepare\n");
 	if (ilt_data_operate_prepare(config) < 0) {
 		return -1;
 	} 
 
+	printf("Network\n");
 	if (ilt_dada_check_network(config) < 0) {
 		ilt_dada_operate_cleanup(config);
 		return -1;
@@ -534,10 +482,12 @@ int ilt_dada_operate(ilt_dada_config *config) {
 		int sleepTime = (config->startPacket - config->currentPacket) / (clock160MHzPacketRate * (1 - config->obsClockBit) + clock200MHzPacketRate * config->obsClockBit);
 		if (sleepTime > 5) {
 			sleep.tv_sec = sleepTime;
+			printf("We are starting early, sleeping for %d seconds.\n", sleepTime);
 			nanosleep(&sleep, &sleep);
 		}
 	}
 
+	printf("Loop\n");
 	// Read new data from the port until the observation ends
 	if (ilt_dada_operate_loop(config) < 0) {
 		ilt_dada_operate_cleanup(config);
@@ -545,7 +495,7 @@ int ilt_dada_operate(ilt_dada_config *config) {
 	}
 
 	// Print debug information about the observing run
-	ilt_dada_packet_comments(config->multilog, config->portNum, config->currentPacket, config->startPacket, config->endPacket, config->params->packetsLastExpected, config->params->packetsLastSeen, config->params->packetsExpected, config->params->packetsSeen);
+	ilt_dada_packet_comments(config->io->dadaWriter[0].multilog, config->portNum, config->currentPacket, config->startPacket, config->endPacket, config->params->packetsLastExpected, config->params->packetsLastSeen, config->params->packetsExpected, config->params->packetsSeen);
 
 
 	// Cleanup network and ringbuffer allocations
@@ -579,33 +529,38 @@ int ilt_dada_operate_loop(ilt_dada_config *config) {
 
 
 	// If we're starting early or the buffer started filling early, consume data until we reach the starting packet
+	printf("First Loop\n");
 	while (config->currentPacket < config->startPacket) {
 		readPackets = recvmmsg(config->sockfd, config->params->msgvec, config->packetsPerIteration, config->recvflags, config->params->timeout);
 		lastPacket = beamformed_packno(*((unsigned int*) &(config->params->packetBuffer[finalPacketOffset + 8])), *((unsigned int*) &(config->params->packetBuffer[finalPacketOffset + 12])), ((lofar_source_bytes*) &(config->params->packetBuffer[1]))->clockBit);
 
-		if (lastPacket >= config->startPacket) {
-			readPackets = lastPacket - config->startPacket;
+		if (lastPacket >= (config->startPacket - config->packetsPerIteration)) {
+			// TOOD: assumes no packets loss
 			writeBytes = readPackets * config->packetSize;
-			writtenBytes = ipcio_write(config->ringbuffer, &(config->params->packetBuffer[(config->packetsPerIteration - readPackets) * config->packetSize]), writeBytes);
+			writtenBytes = ipcio_write(config->io->dadaWriter[0].ringbuffer, &(config->params->packetBuffer[0]), writeBytes);
 
 			if (writtenBytes != writeBytes) {
 				fprintf(stderr, "WARNING Port %d: Tried to write %ld bytes to buffer but only wrote %ld.\n", config->portNum, writeBytes, writtenBytes);
 			}
 
-			config->params->bytesWritten += writtenBytes;
-			config->params->packetsSeen += readPackets;
-			config->params->packetsExpected += lastPacket - config->currentPacket;
-			config->params->packetsLastSeen += readPackets;
-			config->params->packetsLastExpected += lastPacket - config->currentPacket;
+			//config->params->bytesWritten += writtenBytes;
+			//config->params->packetsSeen += readPackets;
+			//config->params->packetsExpected += lastPacket - config->currentPacket;
+			//config->params->packetsLastSeen += readPackets;
+			//config->params->packetsLastExpected += lastPacket - config->currentPacket;
 		}
 
 		config->currentPacket = lastPacket;
 	}
 
+	// Create a locale variables for packets per iteration, so we can reduce the number for the final step
+	int packetsPerIteration = config->packetsPerIteration;
+
+	printf("Second loop\n");
 	// While we still have data to record,
-	while (config->currentPacket < config->params->finalPacket || config->params->minReads > 0) {
+	while (config->currentPacket < config->params->finalPacket) {
 		// Record the next N pckets
-		readPackets = recvmmsg(config->sockfd, config->params->msgvec, config->packetsPerIteration, config->recvflags, config->params->timeout);
+		readPackets = recvmmsg(config->sockfd, config->params->msgvec, packetsPerIteration, config->recvflags, config->params->timeout);
 		
 
 		// Sanity check the amount that are read
@@ -613,14 +568,15 @@ int ilt_dada_operate_loop(ilt_dada_config *config) {
 			fprintf(stderr, "ERROR: recvmmsg on port %d (errno %d: %s)\n", config->portNum, errno, strerror(errno));
 			return -1;
 		}
-		if (readPackets != config->packetsPerIteration) {
-			fprintf(stderr, "WARNING: recvmmsg on port %d received less packets than requested (expected,%d, recieved %d)\n", config->portNum, config->packetsPerIteration, readPackets);
+		if (readPackets != packetsPerIteration) {
+			fprintf(stderr, "WARNING: recvmmsg on port %d received less packets than requested (expected,%d, recieved %d)\n", config->portNum, packetsPerIteration, readPackets);
 		}
 
+		finalPacketOffset = (readPackets - 1) * config->packetSize;
 
 		// Check the packets for errors
 		if (config->checkParameters == CHECK_ALL_PACKETS) {
-			for (int packetIdx = 0; packetIdx < config->packetsPerIteration; packetIdx++) {
+			for (int packetIdx = 0; packetIdx < readPackets; packetIdx++) {
 				// Sanity check packet contents / flags?
 			}
 		} else if (config->checkParameters == CHECK_FIRST_LAST) {
@@ -629,16 +585,6 @@ int ilt_dada_operate_loop(ilt_dada_config *config) {
 				return -1;
 			}
 		}
-
-		// Write the raw packets to the ringbuffer
-		writeBytes = readPackets * config->packetSize;
-		writtenBytes = ipcio_write(config->ringbuffer, &(config->params->packetBuffer[0]), writeBytes);
-
-		// Check that all the packets were written
-		if (writtenBytes != writeBytes) {
-			fprintf(stderr, "WARNING Port %d: Tried to write %ld bytes to buffer but only wrote %ld.\n", config->portNum, writeBytes, writtenBytes);
-		}
-		config->params->bytesWritten += writtenBytes;
 
 		// Get the last packet number
 		lastPacket = beamformed_packno(*((unsigned int*) &(config->params->packetBuffer[finalPacketOffset + 8])), *((unsigned int*) &(config->params->packetBuffer[finalPacketOffset + 12])), ((lofar_source_bytes*) &(config->params->packetBuffer[1]))->clockBit);
@@ -649,25 +595,38 @@ int ilt_dada_operate_loop(ilt_dada_config *config) {
 		config->params->packetsLastSeen += readPackets;
 		config->params->packetsLastExpected += lastPacket - config->currentPacket;
 
+		// Write the raw packets to the ringbuffer
+		writeBytes = readPackets * config->packetSize;
+		writtenBytes = lofar_udp_io_write(config->io, 0, &(config->params->packetBuffer[0]), writeBytes);
+		printf("%ld, %ld, %ld\n", ipcio_tell(config->io->dadaWriter[0].ringbuffer), ipcio_tell(config->io->dadaWriter[0].ringbuffer) % config->packetSize, ipcio_tell(config->io->dadaWriter[0].ringbuffer) / config->packetSize % 256);
+
+		// Check that all the packets were written
+		if (writtenBytes != writeBytes) {
+			fprintf(stderr, "WARNING Port %d: Tried to write %ld bytes to buffer but only wrote %ld.\n", config->portNum, writeBytes, writtenBytes);
+		}
+		config->params->bytesWritten += writtenBytes;
+
+
 		config->currentPacket = lastPacket;
-		config->params->minReads -= 1;
 
 		localLoops++;
 		if (localLoops > config->writesPerStatusLog) {
 			localLoops = 0;
 			#pragma omp task
-			ilt_dada_packet_comments(config->multilog, config->portNum, config->currentPacket, config->startPacket, config->endPacket, config->params->packetsLastExpected, config->params->packetsLastSeen, config->params->packetsExpected, config->params->packetsSeen);
+			ilt_dada_packet_comments(config->io->dadaWriter[0].multilog, config->portNum, config->currentPacket, config->startPacket, config->endPacket, config->params->packetsLastExpected, config->params->packetsLastSeen, config->params->packetsExpected, config->params->packetsSeen);
 			config->params->packetsLastSeen = 0;
 			config->params->packetsLastExpected = 0;
 		}
 
-		if (config->currentPacket > config->params->finalPacket && config->params->minReads < 0) {
-			if (ipcio_stop(config->ringbuffer) < 0) {
-				// No point in returning early, just finish up.	
-			}
-			// Read at least one last buffer of data, then exit.
-			config->params->minReads = config->bufsz / (config->packetsPerIteration * config->packetSize);
+
+		/*  else if (config->currentPacket + packetsPerIteration  > config->params->finalPacket) {
+			// Reduce the number of packets to read t the end of the current page
+			long bufSize = (long) ipcbuf_get_bufsz((ipcbuf_t *) config->io->dadaWriter[0].ringbuffer);
+			printf("Remainder: %ld (%ld)\n", ipcio_tell(config->io->dadaWriter[0].ringbuffer) % bufSize, (long) ((bufSize - (ipcio_tell(config->io->dadaWriter[0].ringbuffer) % bufSize)) / config->packetSize));
+			packetsPerIteration = (long) ((bufSize - (ipcio_tell(config->io->dadaWriter[0].ringbuffer) % bufSize)) / config->packetSize) ?: config->packetsPerIteration;
+			printf("%ld\n", packetsPerIteration);
 		}
+		*/
 	}
 
 
@@ -778,26 +737,9 @@ void ilt_dada_cleanup(ilt_dada_config *config) {
 		shutdown(config->sockfd, SHUT_RDWR);
 	}
 
-
-	// CLose the ringbuffer writers
-	if (config->ringbuffer != NULL && config->header != NULL) {
-		ipcio_close(config->ringbuffer);
-		ipcio_close(config->header);
-
-		// Wait for readers to finish up and exit, or timeout (ipcio_read can hand if it requests data past the EOD point)
-		float totalSleep = 0.0;
-
-		while (totalSleep < config->cleanupTimeout) {
-			if (ipcbuf_get_reader_conn((ipcbuf_t *) config->ringbuffer) != 0) {
-				break;
-			}
-
-			usleep(1000 * 5);
-			totalSleep += 0.005;
-		}
-
-		// Destroy the ringbuffer instances
-		ipcio_destroy(config->ringbuffer);
-		ipcio_destroy(config->header);
-	}
+	lofar_udp_io_write_cleanup(config->io, 0, 1);
+	config->io_setup = 0;
+	FREE_NOT_NULL(config->params);
+	FREE_NOT_NULL(config->io);
+	FREE_NOT_NULL(config);
 }

@@ -27,24 +27,22 @@ int main(int argc, char *argv[]) {
 	int offset = 10, fullReads = 1, portOffset = 1;
 
 	FILE *inputFiles[MAX_NUM_PORTS];
-	static ipcio_t ringbuffer[MAX_NUM_PORTS];
-	static ipcio_t header[MAX_NUM_PORTS];
 
-	ilt_dada_config config[MAX_NUM_PORTS] = { ilt_dada_config_default };
-	ilt_dada_operate_params params[MAX_NUM_PORTS] = { ilt_dada_operate_params_default };
+	ilt_dada_config *config[MAX_NUM_PORTS];
+	config[0] = ilt_dada_init();
 
 
-	config[0].portNum = 16130;
-	config[0].packetsPerIteration = 1024;
-	config[0].key = 16130;
-	config[0].recvflags = -1;
+	config[0]->portNum = 16130;
+	config[0]->packetsPerIteration = 1024;
+	config[0]->io->outputDadaKeys[0] = 16130;
+	config[0]->recvflags = -1;
 
 	while((inputOpt = getopt(argc, argv, "u:H:i:p:n:k:t:w:")) != -1) {
 		switch(inputOpt) {
 
 			case 'u':
 				packets = 1;
-				sscanf(optarg, "%d,%d", &(config[0].portNum), &portOffset);
+				sscanf(optarg, "%d,%d", &(config[0]->portNum), &portOffset);
 				break;
 
 			case 'H':
@@ -56,7 +54,7 @@ int main(int argc, char *argv[]) {
 				break;
 
 			case 'p':
-				config[0].packetsPerIteration = atoi(optarg);
+				config[0]->packetsPerIteration = atoi(optarg);
 				break;
 
 			case 'n':
@@ -69,7 +67,7 @@ int main(int argc, char *argv[]) {
 				break;
 
 			case 'k':
-				sscanf(optarg, "%d,%d", &(config[0].key), &offset);
+				sscanf(optarg, "%d,%d", &(config[0]->io->outputDadaKeys[0]), &offset);
 				break;
 
 			case 't':
@@ -86,44 +84,48 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
-	printf("Preparing to load data from %d file(s) following format %s, with %d packets per iteration.\n", numPorts, inputFile, config[0].packetsPerIteration);
+	printf("Preparing to load data from %d file(s) following format %s, with %d packets per iteration.\n", numPorts, inputFile, config[0]->packetsPerIteration);
 
 	if (packets) {
-		printf("We will be using UDP packets to copy the data starting on host/port %s:%d with an offset of 1. \n", hostIP, config[0].portNum);
+		printf("We will be using UDP packets to copy the data starting on host/port %s:%d with an offset of 1. \n", hostIP, config[0]->portNum);
 	} else {
-		printf("We will be copying the data into the ringbuffers starting at %d (%x) with an offset of %d by copying data directly to the ringbuffer.\n\n", config[0].key, config[0].key, offset);
+		printf("We will be copying the data into the ringbuffers starting at %d (%x) with an offset of %d by copying data directly to the ringbuffer.\n\n", config[0]->io->outputDadaKeys[0], config[0]->io->outputDadaKeys[0], offset);
 	}
 
 
-	config[0].portBufferSize = 4 * PACKET_SIZE * config[0].packetsPerIteration;
+	config[0]->portBufferSize = 4 * PACKET_SIZE * config[0]->packetsPerIteration;
 
 	for (int port = 0; port < numPorts; port++) {
-		config[port].portNum = config[0].portNum + port * portOffset;
+		if (port != 0) {
+			config[port] = ilt_dada_init();
+		}
+		config[port]->portNum = config[0]->portNum + port * portOffset;
 
-		config[port].packetsPerIteration = config[0].packetsPerIteration;
-		config[port].portBufferSize = config[0].portBufferSize;
-		config[port].recvflags = config[0].recvflags;
+		config[port]->packetsPerIteration = config[0]->packetsPerIteration;
+		config[port]->portBufferSize = config[0]->portBufferSize;
+		config[port]->recvflags = config[0]->recvflags;
 
-
-		config[port].key = config[0].key + offset * port;
-		config[port].params = &(params[port]);
+		config[port]->io->outputDadaKeys[0] = config[0]->io->outputDadaKeys[0] + offset * port;
 
 		if (packets == 0) {
-			ringbuffer[port] = IPCIO_INIT;
-			header[port] = IPCIO_INIT;
-			config[port].ringbuffer = &(ringbuffer[port]);
-			config[port].header = &(header[port]);
-		}
-		config[port].nbufs = 32;
-		config[port].bufsz = 4 * PACKET_SIZE * config[0].packetsPerIteration;
-	}
+			config[port]->io->readerType = DADA_ACTIVE;
+			config[port]->io->dadaConfig.nbufs = 32;
+			config[port]->io->writeBufSize[port] = 4 * PACKET_SIZE * config[0]->packetsPerIteration;
 
+			// Initialise the ringbuffer, exit on failure
+			if (lofar_udp_io_write_setup(config[port]->io, 0) < 0) {
+				return 1;
+			}
+		}
+
+		
+	}
 
 	struct addrinfo *serverInfo;
 
 	if (packets == 1) {
 		for (int port = 0; port < numPorts; port++) {
-			if (ilt_dada_initialise_port(&(config[port])) < 0) {
+			if (ilt_dada_initialise_port(config[port]) < 0) {
 				return 1;
 			}
 		}
@@ -136,15 +138,15 @@ int main(int argc, char *argv[]) {
 
 		// Convert the port to a string for getaddrinfo
 		char portNumStr[16];
-		sprintf(portNumStr, "%d", config[0].portNum);
+		sprintf(portNumStr, "%d", config[0]->portNum);
 
 		// Struct to collect the results from getaddrinfo
 		int status;
 
 		// Populate the remaining parts of addressInfo
 		if ((status = getaddrinfo(hostIP, portNumStr, &addressInfo, &serverInfo)) < 0) {
-			fprintf(stderr, "ERROR: Failed to get address info on port %d (errno %d: %s).", config->portNum, status, gai_strerror(status));
-			return -1;
+			fprintf(stderr, "ERROR: Failed to get address info on port %d (errno %d: %s).", config[0]->portNum, status, gai_strerror(status));
+			return 1;
 		}
 
 	}
@@ -162,27 +164,21 @@ int main(int argc, char *argv[]) {
 
 		
 		if (packets == 0) {
-			printf("Allocating %ld MB for %d %d byte packets on port %d\n", (long) config[0].packetsPerIteration * PACKET_SIZE >> 20, config[0].packetsPerIteration, PACKET_SIZE, port);
-			config[port].params->packetBuffer = calloc(config[0].packetsPerIteration * PACKET_SIZE, sizeof(char));
+			printf("Allocating %ld MB for %d %d byte packets on port %d\n", (long) config[0]->packetsPerIteration * PACKET_SIZE >> 20, config[0]->packetsPerIteration, PACKET_SIZE, port);
+			config[port]->params->packetBuffer = calloc(config[0]->packetsPerIteration * PACKET_SIZE, sizeof(char));
 
-			if (config[port].params->packetBuffer == NULL) {
+			if (config[port]->params->packetBuffer == NULL) {
 				fprintf(stderr, "ERROR: Failed to allocate data on port %d, exiting.\n", port);
 				return 1;
 			}
 
-
-
-			if (ilt_dada_initialise_ringbuffer_hdu(&(config[port])) < 0) {
-				return 1;
-			}
-
 		} else {
-			if (ilt_data_operate_prepare(&(config[port])) < 0) {
+			if (ilt_data_operate_prepare(config[port]) < 0) {
 				return 1;
 			}
 
-			if (connect(config[port].sockfd, serverInfo->ai_addr, sizeof(struct sockaddr))== -1) {
-				fprintf(stderr, "ERROR: Unable to connect to remote host %s:%d (errno %d, %s)\n", hostIP, config[port].portNum, errno, strerror(errno));
+			if (connect(config[port]->sockfd, serverInfo->ai_addr, sizeof(struct sockaddr))== -1) {
+				fprintf(stderr, "ERROR: Unable to connect to remote host %s:%d (errno %d, %s)\n", hostIP, config[port]->portNum, errno, strerror(errno));
 				return 1;
 			}
 
@@ -193,26 +189,26 @@ int main(int argc, char *argv[]) {
 
 	while (packetCount < totalPackets && fullReads) {
 		for (int port = 0; port < numPorts; port++) {
-			readBytes = fread(&(config[port].params->packetBuffer[0]), sizeof(char), config[port].packetsPerIteration * PACKET_SIZE, inputFiles[port]);
+			readBytes = fread(&(config[port]->params->packetBuffer[0]), sizeof(char), config[port]->packetsPerIteration * PACKET_SIZE, inputFiles[port]);
 
 			if (packets == 0) {
-				writtenBytes = ipcio_write(&(ringbuffer[port]), &(config[port].params->packetBuffer[0]), readBytes);
+				writtenBytes = ipcio_write(config[port]->io->dadaWriter[0].ringbuffer, &(config[port]->params->packetBuffer[0]), readBytes);
 			} else {
 				// sendmmg returns number of packets, multily by packet length to get bytes
-				writtenBytes = sendmmsg(config[port].sockfd, config[port].params->msgvec, config[port].packetsPerIteration, 0);
+				writtenBytes = sendmmsg(config[port]->sockfd, config[port]->params->msgvec, config[port]->packetsPerIteration, 0);
 				writtenBytes *= PACKET_SIZE;
 			}
 
-			if (readBytes != config[port].packetsPerIteration * PACKET_SIZE) {
+			if (readBytes != config[port]->packetsPerIteration * PACKET_SIZE) {
 				fullReads = 0;
-				printf("Read less data than expected (%ld, %ld), finishing up.\n", readBytes, (long) config[port].packetsPerIteration * PACKET_SIZE);
+				printf("Read less data than expected (%ld, %ld), finishing up.\n", readBytes, (long) config[port]->packetsPerIteration * PACKET_SIZE);
 			}
 
 
 			if (writtenBytes != readBytes) {
 				fprintf(stderr, "WARNING Port %d: Tried to send/write %ld bytes to buffer but only wrote %ld (errno: %d, %s).\n", port, readBytes, writtenBytes, errno, strerror(errno));
 			} else {
-				printf("Port %d: sent/wrote %d packets to buffer.\n", port, config[port].packetsPerIteration);
+				printf("Port %d: sent/wrote %d packets to buffer.\n", port, config[port]->packetsPerIteration);
 			}
 		}
 		printf("\n\n");
@@ -223,8 +219,8 @@ int main(int argc, char *argv[]) {
 	for (int port = 0; port < numPorts; port++) {
 		printf("Freeing memory/closing file for port %d\n", port);
 
-		ilt_dada_operate_cleanup(config);
-		ilt_dada_cleanup(&(config[port]));
+		ilt_dada_operate_cleanup(config[port]);
+		ilt_dada_cleanup(config[port]);
 		fclose(inputFiles[port]);
 	}
 

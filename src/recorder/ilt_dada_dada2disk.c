@@ -20,8 +20,8 @@ int main(int argc, char  *argv[]) {
 	(*meta) = lofar_udp_meta_default;
 	meta->packetsPerIteration = 4096;
 
-	lofar_udp_reader_input *rdrConfig = calloc(1, sizeof(lofar_udp_reader_input));
-	(*rdrConfig) = lofar_udp_reader_input_default;
+	lofar_udp_io_read_config *rdrConfig = calloc(1, sizeof(lofar_udp_io_read_config));
+	(*rdrConfig) = lofar_udp_io_read_config_default;
 
 	lofar_udp_io_write_config *wrtConfig = calloc(1, sizeof(lofar_udp_io_write_config));
 	(*wrtConfig) = lofar_udp_io_write_config_default;
@@ -88,7 +88,7 @@ int main(int argc, char  *argv[]) {
 	// Read in headers from the input
 	for (int port = 0; port < meta->numPorts; port++) {
 		config->dadaKeys[port] = config->dadaKeys[0] + port * ringbufferOffset;
-		if (lofar_udp_io_fread_temp_DADA(tmpHeaders[port], sizeof(char), UDPHDRLEN, config->dadaKeys[port], 1) < UDPHDRLEN) {
+		if (lofar_udp_io_read_temp_DADA(tmpHeaders[port], sizeof(char), UDPHDRLEN, config->dadaKeys[port], 1) < UDPHDRLEN) {
 			CLICleanup();
 			return 1;
 		}
@@ -114,7 +114,7 @@ int main(int argc, char  *argv[]) {
 	// Setup the readers
 	rdrConfig->readerType = DADA_ACTIVE;
 	for (int port = 0; port < meta->numPorts; port++) {
-		if (lofar_udp_io_read_setup(rdrConfig, config, meta, port) < 0) {
+		if (lofar_udp_io_read_setup_helper(rdrConfig, config, meta, port) < 0) {
 			CLICleanup();
 			return 1;
 		}
@@ -122,7 +122,7 @@ int main(int argc, char  *argv[]) {
 
 	// Setup the writers
 	for (int outp = 0; outp < meta->numPorts; outp++) {
-		if (lofar_udp_io_write_setup(wrtConfig, meta, 0) < 0) {
+		if (lofar_udp_io_write_setup_helper(wrtConfig, meta, 0) < 0) {
 			CLICleanup();
 			return 1;
 		}

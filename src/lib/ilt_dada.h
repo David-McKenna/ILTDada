@@ -29,6 +29,7 @@
 
 // Include udpPacketManager general for consistant constants between the writer/consumer, easy access to the source bytes struct and the packet nubmer functions
 #include "lofar_udp_general.h"
+#include "lofar_udp_io.h"
 #include "lofar_udp_misc.h"
 
 
@@ -38,7 +39,8 @@
 #ifndef __ILT_DADA_DEFINES_H
 #define __ILT_DADA_DEFINES_H
 
-#define MAX_UDP_LEN UDPNTIMESLICE * UDPNPOL * 122 + UDPHDRLEN
+// UDPNTIMESLICE * UDPNPOL * 122 + UDPHDRLEN
+#define MAX_UDP_LEN 7824
 
 #endif
 
@@ -68,10 +70,9 @@ typedef struct ilt_dada_operate_params {
 	long packetsLastSeen;
 	long packetsLastExpected;
 	long finalPacket;
-	int minReads;
 	long bytesWritten;
 } ilt_dada_operate_params;
-extern ilt_dada_operate_params ilt_dada_operate_params_default;
+extern const ilt_dada_operate_params ilt_dada_operate_params_default;
 
 typedef struct ilt_dada_config {
 	// UDP configuration
@@ -87,39 +88,28 @@ typedef struct ilt_dada_config {
 	int checkInitData;
 	int checkParameters;
 	int writesPerStatusLog;
-	int cleanupTimeout;
 
 
 	// Observation configuration
 	long startPacket;
 	long endPacket;
+	long currentPacket;
 	int packetsPerIteration;
 	unsigned char obsClockBit;
 	unsigned char obsBitMode;
 
 
-	// PSRSDADA configuration
-	int key;
-	uint64_t nbufs;
-	uint64_t bufsz;
-	unsigned int num_readers;
-	char syslog;
-	char programName[64];
-
-
 	// Ringbuffer working variables
 	int sockfd;
 	char headerText[DADA_DEFAULT_HEADER_SIZE];
-	long currentPacket;
-	ipcio_t *ringbuffer;
-	ipcio_t *header;
-	multilog_t *multilog;
 
 	// Main operation loop variables
 	ilt_dada_operate_params *params;
+	lofar_udp_io_write_config *io;
+	int io_setup;
 
 } ilt_dada_config;
-extern ilt_dada_config ilt_dada_config_default;
+extern const ilt_dada_config ilt_dada_config_default;
 #endif
 
 
@@ -132,8 +122,8 @@ extern "C" {
 #endif 
 
 // Main functions
-int ilt_dada_initialise_port(ilt_dada_config *config);
-int ilt_dada_initialise_ringbuffer(ilt_dada_config *config);
+ilt_dada_config* ilt_dada_init();
+int ilt_dada_setup(ilt_dada_config *config, int setup_io);
 void ilt_dada_cleanup(ilt_dada_config *config);
 
 
@@ -146,12 +136,11 @@ int ilt_dada_operate_loop(ilt_dada_config *config);
 void ilt_dada_packet_comments(multilog_t *multilog, int portNum, long currentPacket, long startPacket, long endPacket, long packetsLastExpected, long packetsLastSeen, long packetsExpected, long packetsSeen);
 
 
-
-// Internal functions
+// Internal functions, may be useful eslewhere (e.g., fill_buffer)
 void cleanup_initialise_port(struct addrinfo *serverInfo, int sockfd_init);
-int ilt_dada_initialise_ringbuffer_hdu(ilt_dada_config *config);
 int ilt_data_operate_prepare(ilt_dada_config *config);
 void ilt_dada_operate_cleanup(ilt_dada_config *config);
+
 
 #ifdef __cplusplus
 }
