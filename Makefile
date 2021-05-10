@@ -12,7 +12,7 @@ CXX ?= "c++"
 
 OPT_ARCH ?= "native"
 CFLAGS += -W -Wall -Ofast -march=$(OPT_ARCH) -mtune=$(OPT_ARCH) -fPIC -funswitch-loops -fopenmp
-CFLAGS += -g -ggdb -fsanitize=address
+#CFLAGS += -g -ggdb -fsanitize=address
 
 
 DEFINES += -DVERSION=$(LIB_VER) -DVERSION_MINOR=$(LIB_VER_MINOR) -DVERSIONCLI=$(CLI_VER)

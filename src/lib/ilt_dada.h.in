@@ -32,8 +32,15 @@
 #include "lofar_udp_io.h"
 #include "lofar_udp_misc.h"
 
+#define ILTD_VERSION_MAJOR @PROJECT_VERSION_MAJOR@
+#define ILTD_VERSION_MINOR @PROJECT_VERSION_MINOR@
+#define ILTD_VERSION_PATCH @PROJECT_VERSION_PATCH@
+#define ILTD_VERSION "@PROJECT_VERSION@"
 
-#endif
+#define ILTD_CLI_VERSION "@ILTD_CLI_VERSION@"
+
+
+#endif // End of __ILT_DADA_INCLUDE_H
 
 // Main Defines
 #ifndef __ILT_DADA_DEFINES_H
@@ -110,7 +117,8 @@ typedef struct ilt_dada_config {
 
 } ilt_dada_config;
 extern const ilt_dada_config ilt_dada_config_default;
-#endif
+
+#endif // End of __ILT_DADA_STRUCTS
 
 
 // Main Prototypes
@@ -145,4 +153,5 @@ void ilt_dada_operate_cleanup(ilt_dada_config *config);
 #ifdef __cplusplus
 }
 #endif
-#endif
+
+#endif // End of __ILT_DADA_PROTOS_H

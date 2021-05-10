@@ -3,7 +3,7 @@
 #define DEF_PORT 16130
 
 void helpMessgaes() {
-	printf("ILTDada CLI (CLI v%f, lib %f)\n\n", VERSIONCLI, VERSION);
+	printf("ILTDada CLI (CLI v%s, lib %s)\n\n", ILTD_CLI_VERSION, ILTD_VERSION);
 
 	printf("-p (int):	UDP port to monitor (default: %d)\n", DEF_PORT);
 	printf("-k (int):	Output PSRDADA Ringbuffer key (default: %d)\n\n", DEF_PORT);
