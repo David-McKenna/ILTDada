@@ -28,6 +28,7 @@ const ilt_dada_config ilt_dada_config_default = {
 
 
 	// Recorder checks configuration
+	.forceStartup = 0,
 	.checkInitParameters = 1,
 	.checkInitData = 1,
 	.checkParameters = CHECK_FIRST_LAST,
@@ -180,6 +181,7 @@ int ilt_dada_initialise_port(ilt_dada_config *config) {
 				} else if (dummy <= 0) {
 					fprintf(stderr, "ERROR: This may be due to your maximum socket buffer being too low, but we could not read /proc/sys/net/core/rmem_max to verify this.\n");
 				}
+				fprintf(stderr, "ERROR: You require root access to this machine resolve this issue. Please run the command `[sudo] sysctl -w net/core/rmem_max=%ld`\n", (2 * config->portBufferSize - 1));
 				fclose(rmemMax);
 			}
 			cleanup_initialise_port(serverInfo, sockfd_init);
@@ -282,7 +284,7 @@ int ilt_dada_check_config(ilt_dada_config *config) {
  *
  * @return     0 (success) / -1 (failure)
  */
-int ilt_dada_setup(ilt_dada_config *config ,int setup_io) {
+int ilt_dada_setup(ilt_dada_config *config, int setup_io) {
 
 	if (ilt_dada_check_config(config) < 0) {
 		return -1;
@@ -292,16 +294,14 @@ int ilt_dada_setup(ilt_dada_config *config ,int setup_io) {
 		return -1;
 	}
 
-	if (ilt_dada_check_network(config) < 0) {
-		return -1;
-	}
-
 	if (setup_io) {
-		// Initialise the ringbuffer, exit on failure
-		if (lofar_udp_io_write_setup(config->io, 0) < 0) {
+		if (ilt_dada_setup_ringbuffer(config) < 0) {
 			return -1;
 		}
-		config->io_setup = 1;
+	}
+
+	if (ilt_dada_check_network(config) < 0) {
+		return -1;
 	}
 
 	return 0;
@@ -360,10 +360,11 @@ int ilt_dada_check_network(ilt_dada_config *config) {
 	// 16 + (61,122,244) * 16 * 4 / (0.5 1, 2)
 	// Max == 7824
 	config->packetSize = (int) (UDPHDRLEN + buffer[6] * buffer[7] * ((float) UDPNPOL / (source->bitMode ? source->bitMode : 0.5)));
+	printf("PACKET SIZE: %d\n", config->packetSize);
 
 
 	// Offset by 1 to account for the fact we will read this packet again (since we used MSG_PEEK)
-	config->currentPacket = beamformed_packno(*((unsigned int*) &(buffer[8])), *((unsigned int*) &(buffer[12])), source->clockBit) - 1; 
+	config->currentPacket = lofar_udp_time_beamformed_packno(*((unsigned int*) &(buffer[8])), *((unsigned int*) &(buffer[12])), source->clockBit) - 1; 
 
 	return 0;
 }
@@ -434,16 +435,65 @@ int ilt_dada_check_header(ilt_dada_config *config, unsigned char* buffer) {
 	return 0;
 }
 
+int ilt_dada_connect_and_destroy_ringbuffer(int key) {
+	ipcio_t tmpIpc = IPCIO_INIT;
+	
+	if (ipcio_connect(&tmpIpc, key) < 0) {
+		fprintf(stderr, "WARNING: Failed to connect to ringbuffer %d, we may be able to continue from here.\n", key);
+		return 0;
+	}
+
+	if (ipcio_destroy(&tmpIpc) < 0) {
+		fprintf(stderr, "ERROR: Failed to destroy ringbuffer %d, exiting.\n", key);
+		return -1;
+	}
+
+	return 0;
+}
+
+int ilt_dada_setup_ringbuffer(ilt_dada_config *config) {
+	if (!config->io_setup) {
+		if (lofar_udp_io_write_setup(config->io, 0) < 0) {
+			if (config->forceStartup) {
+				fprintf(stderr, "ERROR: Failed to attach to given ringbuffer %d, attempting to destroy given keys and then will try to connect again.\n", config->io->outputDadaKeys[0]);
+
+				// Cleanup the state of the struct
+				// TODO: Sort out the UPM issue preventing me from using the cleanup function (writing to a broken state)
+				FREE_NOT_NULL(config->io->dadaWriter[0].ringbuffer);
+				FREE_NOT_NULL(config->io->dadaWriter[0].header);
+				lofar_udp_io_write_cleanup(config->io, 0, 1);
+
+				if (ilt_dada_connect_and_destroy_ringbuffer(config->io->outputDadaKeys[0]) < 0) {
+					return -1;
+				}
+				
+				if (ilt_dada_connect_and_destroy_ringbuffer(config->io->outputDadaKeys[0] + 1) < 0) {
+					return -1;
+				}
+
+				if (lofar_udp_io_write_setup(config->io, 0) < 0) {
+					fprintf(stderr, "ERROR: Failed to connect to ringbuffer %d after attempting to destroy existing buffer, exiting.\n", config->io->outputDadaKeys[0]);
+					return -1;
+				}
+
+			} else {
+				return -1;
+			}
+		}
+		config->io_setup = 1;
+	}
+
+	return 0;
+}
+
 
 
 int ilt_dada_operate(ilt_dada_config *config) {
 
 	if (!config->io_setup) {
-		// Initialise the ringbuffer, exit on failure
-		if (lofar_udp_io_write_setup(config->io, 0) < 0) {
+		if (ilt_dada_setup_ringbuffer(config) < 0) {
 			return -1;
 		}
-		config->io_setup = 1;
 	}
 
 	// Timeout apparently is relative to the socket being oepned, so it's useless.
@@ -532,14 +582,16 @@ int ilt_dada_operate_loop(ilt_dada_config *config) {
 	printf("First Loop\n");
 	while (config->currentPacket < config->startPacket) {
 		readPackets = recvmmsg(config->sockfd, config->params->msgvec, config->packetsPerIteration, config->recvflags, config->params->timeout);
-		lastPacket = beamformed_packno(*((unsigned int*) &(config->params->packetBuffer[finalPacketOffset + 8])), *((unsigned int*) &(config->params->packetBuffer[finalPacketOffset + 12])), ((lofar_source_bytes*) &(config->params->packetBuffer[1]))->clockBit);
+		lastPacket = lofar_udp_time_beamformed_packno(*((unsigned int*) &(config->params->packetBuffer[finalPacketOffset + 8])), *((unsigned int*) &(config->params->packetBuffer[finalPacketOffset + 12])), ((lofar_source_bytes*) &(config->params->packetBuffer[1]))->clockBit);
 
 		if (lastPacket >= (config->startPacket - config->packetsPerIteration)) {
 			// TOOD: assumes no packets loss
 			writeBytes = readPackets * config->packetSize;
 			writtenBytes = ipcio_write(config->io->dadaWriter[0].ringbuffer, &(config->params->packetBuffer[0]), writeBytes);
 
-			if (writtenBytes != writeBytes) {
+			if (writtenBytes < 0) {
+				fprintf(stderr, "ERROR Port %d: Failed to write data to ringbuffer %d, exiting.\n", config->portNum, config->io->outputDadaKeys[0]);
+			} else if (writtenBytes != writeBytes) {
 				fprintf(stderr, "WARNING Port %d: Tried to write %ld bytes to buffer but only wrote %ld.\n", config->portNum, writeBytes, writtenBytes);
 			}
 
@@ -587,7 +639,7 @@ int ilt_dada_operate_loop(ilt_dada_config *config) {
 		}
 
 		// Get the last packet number
-		lastPacket = beamformed_packno(*((unsigned int*) &(config->params->packetBuffer[finalPacketOffset + 8])), *((unsigned int*) &(config->params->packetBuffer[finalPacketOffset + 12])), ((lofar_source_bytes*) &(config->params->packetBuffer[1]))->clockBit);
+		lastPacket = lofar_udp_time_beamformed_packno(*((unsigned int*) &(config->params->packetBuffer[finalPacketOffset + 8])), *((unsigned int*) &(config->params->packetBuffer[finalPacketOffset + 12])), ((lofar_source_bytes*) &(config->params->packetBuffer[1]))->clockBit);
 
 		// Calcualte packet loss / misses / etc.
 		config->params->packetsSeen += readPackets;
@@ -601,7 +653,9 @@ int ilt_dada_operate_loop(ilt_dada_config *config) {
 		printf("%ld, %ld, %ld\n", ipcio_tell(config->io->dadaWriter[0].ringbuffer), ipcio_tell(config->io->dadaWriter[0].ringbuffer) % config->packetSize, ipcio_tell(config->io->dadaWriter[0].ringbuffer) / config->packetSize % 256);
 
 		// Check that all the packets were written
-		if (writtenBytes != writeBytes) {
+		if (writtenBytes < 0) {
+			fprintf(stderr, "ERROR Port %d: Failed to write data to ringbuffer %d, exiting.\n", config->portNum, config->io->outputDadaKeys[0]);
+		} else if (writtenBytes != writeBytes) {
 			fprintf(stderr, "WARNING Port %d: Tried to write %ld bytes to buffer but only wrote %ld.\n", config->portNum, writeBytes, writtenBytes);
 		}
 		config->params->bytesWritten += writtenBytes;

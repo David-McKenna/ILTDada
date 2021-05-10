@@ -30,7 +30,7 @@
 // Include udpPacketManager general for consistant constants between the writer/consumer, easy access to the source bytes struct and the packet nubmer functions
 #include "lofar_udp_general.h"
 #include "lofar_udp_io.h"
-#include "lofar_udp_misc.h"
+#include "lofar_udp_time.h"
 
 #define ILTD_VERSION_MAJOR @PROJECT_VERSION_MAJOR@
 #define ILTD_VERSION_MINOR @PROJECT_VERSION_MINOR@
@@ -91,6 +91,8 @@ typedef struct ilt_dada_config {
 	int recvflags;
 
 	// ILTDada runtime options
+	int forceStartup;
+	int bufAssumePacketLength;
 	int checkInitParameters;
 	int checkInitData;
 	int checkParameters;
@@ -134,6 +136,8 @@ ilt_dada_config* ilt_dada_init();
 int ilt_dada_setup(ilt_dada_config *config, int setup_io);
 void ilt_dada_cleanup(ilt_dada_config *config);
 
+// Internal setup functions
+
 
 int ilt_dada_check_config(ilt_dada_config *config);
 int ilt_dada_check_network(ilt_dada_config *config);
@@ -145,7 +149,9 @@ void ilt_dada_packet_comments(multilog_t *multilog, int portNum, long currentPac
 
 
 // Internal functions, may be useful eslewhere (e.g., fill_buffer)
+int ilt_dada_initialise_port(ilt_dada_config *config);
 void cleanup_initialise_port(struct addrinfo *serverInfo, int sockfd_init);
+int ilt_dada_setup_ringbuffer(ilt_dada_config *config);
 int ilt_data_operate_prepare(ilt_dada_config *config);
 void ilt_dada_operate_cleanup(ilt_dada_config *config);
 

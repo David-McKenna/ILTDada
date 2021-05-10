@@ -16,8 +16,8 @@ int main(int argc, char  *argv[]) {
 	lofar_udp_config *config = calloc(1, sizeof(lofar_udp_config));
 	(*config) = lofar_udp_config_default;
 
-	lofar_udp_meta *meta = calloc(1, sizeof(lofar_udp_meta));
-	(*meta) = lofar_udp_meta_default;
+	lofar_udp_input_meta *meta = calloc(1, sizeof(lofar_udp_input_meta));
+	(*meta) = lofar_udp_input_meta_default;
 	meta->packetsPerIteration = 4096;
 
 	lofar_udp_io_read_config *rdrConfig = calloc(1, sizeof(lofar_udp_io_read_config));

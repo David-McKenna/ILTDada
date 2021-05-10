@@ -41,7 +41,7 @@ FetchContent_Declare(udpPacketManager
                      )
 
 FetchContent_MakeAvailable(udpPacketManager)
-#include_directories(${udpPacketManager_SOURCE_DIR}/src/lib/)
+include_directories(${udpPacketManager_SOURCE_DIR}/src/lib/)
 message("")
 
 

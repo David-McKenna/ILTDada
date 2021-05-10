@@ -124,7 +124,9 @@ int main(int argc, char *argv[]) {
 	struct addrinfo *serverInfo;
 
 	if (packets == 1) {
+		printf("Initialisng networking components...\n");
 		for (int port = 0; port < numPorts; port++) {
+
 			if (ilt_dada_initialise_port(config[port]) < 0) {
 				return 1;
 			}

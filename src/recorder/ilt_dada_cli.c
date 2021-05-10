@@ -33,11 +33,11 @@ int main(int argc, char  *argv[]) {
 
 
 	char inputOpt;
-	int bufferMul = 64;
+	int bufferMul = 64, packetSizeCopy = -1;
 	float targetSeconds = 5.0f, obsSeconds = 60.0f;
 	char startTime[DEF_STR_LEN] = "", endTime[DEF_STR_LEN] = "";
 
-	while ((inputOpt = getopt(argc, argv, "cp:k:n:m:s:t:S:T:r:")) != -1) {
+	while ((inputOpt = getopt(argc, argv, "p:k:n:m:s:t:S:T:r:fl:")) != -1) {
 		switch (inputOpt) {
 
 			case 'p':
@@ -77,6 +77,15 @@ int main(int argc, char  *argv[]) {
 				cfg->io->dadaConfig.num_readers = atoi(optarg);
 				break;
 
+			case 'f':
+				cfg->forceStartup = 1;
+				break;
+
+			case 'l':
+				cfg->packetSize = atoi(optarg);
+				packetSizeCopy = atoi(optarg);
+				break;
+
 			default:
 				fprintf(stderr, "ERROR: Unknown flag %c, exiting.\n", inputOpt);
 				ilt_dada_cleanup(cfg);
@@ -84,9 +93,17 @@ int main(int argc, char  *argv[]) {
 		}
 	}
 
+	cfg->io->writeBufSize[0] = bufferMul * cfg->packetsPerIteration * cfg->packetSize;
+	
+
+	if (((float) bufferMul * cfg->packetsPerIteration) / (float) 12207 > targetSeconds) {
+		fprintf(stderr, "ERROR: Requested time is less than the size of a single buffer(%f vs %f); increase -s or decrease -m, exiting.\n", ((float) cfg->io->writeBufSize[0] / cfg->packetSize) / (float) 12207, targetSeconds);
+		return 1;
+	}
+	cfg->io->dadaConfig.nbufs = targetSeconds * 12207 / cfg->packetsPerIteration / bufferMul;
+
 	printf("Setting up networking...\n");
-	if (ilt_dada_setup(cfg, 0) < 0) {
-		printf("Exiting.\n");
+	if (ilt_dada_setup(cfg, cfg->bufAssumePacketLength > 0) < 0) {
 		ilt_dada_cleanup(cfg);
 		return 1;
 	}
@@ -101,10 +118,10 @@ int main(int argc, char  *argv[]) {
 	}
 
 	// Convert the start time to a packet
-	cfg->startPacket = getStartingPacket(startTime, cfg->obsClockBit);
+	cfg->startPacket = lofar_udp_time_get_packet_from_isot(startTime, cfg->obsClockBit);
 
 	if (strcmp(endTime, "") != 0) {
-		cfg->endPacket = getStartingPacket(endTime, cfg->obsClockBit);
+		cfg->endPacket = lofar_udp_time_get_packet_from_isot(endTime, cfg->obsClockBit);
 
 		if (obsSeconds != 60.0f) {
 			fprintf(stderr, "WARNING: Ignoring input observation length (%f) and using input end time instead (%s).\n", obsSeconds, endTime);
@@ -113,15 +130,11 @@ int main(int argc, char  *argv[]) {
 		cfg->endPacket = cfg->startPacket + (obsSeconds * (clock160MHzPacketRate * (1 - cfg->obsClockBit) + clock200MHzPacketRate * cfg->obsClockBit));
 	}
 
-	cfg->io->writeBufSize[0] = bufferMul * cfg->packetsPerIteration * MAX_UDP_LEN;
-	
 
-	if (((float) bufferMul * cfg->packetsPerIteration) / (float) 12207 > targetSeconds) {
-		fprintf(stderr, "ERROR: Requested time is less than the size of a single buffer(%f vs %f); increase -s or decrease -m, exiting.\n", ((float) cfg->io->writeBufSize[0] / MAX_UDP_LEN) / (float) 12207, targetSeconds);
-		return 1;
+
+	if (cfg->packetSize != packetSizeCopy && packetSizeCopy != -1) {
+		fprintf(stderr, "ERROR: Provided packet length differs from obseved packet length (%d vs %d), this may cause issues. Attempting to continue...\n", cfg->bufAssumePacketLength, cfg->packetSize);
 	}
-	cfg->io->dadaConfig.nbufs = targetSeconds * 12207 / cfg->packetsPerIteration / bufferMul;
-
 
 	printf("Preparing ILTDada to record data from port %d, consuming %d packets per iteration.\n", cfg->portNum, cfg->packetsPerIteration);
 	printf("Ring buffer on key  %d (ptr %x) will require %ld MB (%ld GB) of memory to hold ~%ld seconds of data in %" PRIu64 " buffers.\n", cfg->io->outputDadaKeys[0], cfg->io->outputDadaKeys[0], cfg->io->writeBufSize[0] * cfg->io->dadaConfig.nbufs >> 20, cfg->io->writeBufSize[0] * cfg->io->dadaConfig.nbufs >> 30, cfg->packetsPerIteration * cfg->io->dadaConfig.nbufs / 12207, cfg->io->dadaConfig.nbufs);
