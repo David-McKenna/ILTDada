@@ -52,6 +52,12 @@ const ilt_dada_config ilt_dada_config_default = {
 	.io = NULL,
 	.io_setup = 0,
 };
+void ilt_dada_sleep(double seconds) {
+	printf("Sleeping for %lf seconds.\n", seconds);
+
+	struct timespec sleep = { (int) seconds, (int) (seconds - (int) seconds) * 1e9 };
+	nanosleep(&sleep, NULL);
+}
 
 ilt_dada_config* ilt_dada_init() {
 	ilt_dada_config *config = calloc(1, sizeof(ilt_dada_config));
@@ -181,7 +187,7 @@ int ilt_dada_initialise_port(ilt_dada_config *config) {
 				} else if (dummy <= 0) {
 					fprintf(stderr, "ERROR: This may be due to your maximum socket buffer being too low, but we could not read /proc/sys/net/core/rmem_max to verify this.\n");
 				}
-				fprintf(stderr, "ERROR: You require root access to this machine resolve this issue. Please run the command `[sudo] sysctl -w net/core/rmem_max=%ld`\n", (2 * config->portBufferSize - 1));
+				fprintf(stderr, "ERROR: You require root access to this machine resolve this issue. Please run the commands `echo 'net.core.rmem_max=%ld' | [sudo] tee -a /etc/sysctl.conf` and `[sudo] sysctl -p` to change your kernel properties.\n", (2 * config->portBufferSize - 1));
 				fclose(rmemMax);
 			}
 			cleanup_initialise_port(serverInfo, sockfd_init);
@@ -528,12 +534,9 @@ int ilt_dada_operate(ilt_dada_config *config) {
 		config->currentPacket = config->startPacket;
 	} else {
 		// Sleep until we're 5 seconds from the desired start time
-		struct timespec sleep = { 0 };
 		int sleepTime = (config->startPacket - config->currentPacket) / (clock160MHzPacketRate * (1 - config->obsClockBit) + clock200MHzPacketRate * config->obsClockBit);
 		if (sleepTime > 5) {
-			sleep.tv_sec = sleepTime;
-			printf("We are starting early, sleeping for %d seconds.\n", sleepTime);
-			nanosleep(&sleep, &sleep);
+			ilt_dada_sleep(sleepTime);
 		}
 	}
 

@@ -2,6 +2,9 @@
 
 #define DEF_PORT 16130
 
+time_t unixTimeFromString(char *inputStr);
+int ilt_dada_cli_check_times(char *startTime, char *endTime, double obsSeconds, int ignoreTimeCheck, int minStartup);
+
 void helpMessgaes() {
 	printf("ILTDada CLI (CLI v%s, lib %s)\n\n", ILTD_CLI_VERSION, ILTD_VERSION);
 
@@ -33,11 +36,12 @@ int main(int argc, char  *argv[]) {
 
 
 	char inputOpt;
-	int bufferMul = 64, packetSizeCopy = -1;
+	int bufferMul = 64, packetSizeCopy = -1, minStartup = 60, ignoreTimeCheck = 0;
 	float targetSeconds = 5.0f, obsSeconds = 60.0f;
 	char startTime[DEF_STR_LEN] = "", endTime[DEF_STR_LEN] = "";
+	time_t startUnixTime, endUnixTime;
 
-	while ((inputOpt = getopt(argc, argv, "p:k:n:m:s:t:S:T:r:fl:")) != -1) {
+	while ((inputOpt = getopt(argc, argv, "p:k:n:m:s:t:S:T:r:fl:w:C")) != -1) {
 		switch (inputOpt) {
 
 			case 'p':
@@ -86,6 +90,14 @@ int main(int argc, char  *argv[]) {
 				packetSizeCopy = atoi(optarg);
 				break;
 
+			case 'w':
+				minStartup = atoi(optarg);
+				break;
+
+			case 'C':
+				ignoreTimeCheck = 1;
+				break;
+
 			default:
 				fprintf(stderr, "ERROR: Unknown flag %c, exiting.\n", inputOpt);
 				ilt_dada_cleanup(cfg);
@@ -93,47 +105,47 @@ int main(int argc, char  *argv[]) {
 		}
 	}
 
-	cfg->io->writeBufSize[0] = bufferMul * cfg->packetsPerIteration * cfg->packetSize;
-	
 
+
+	cfg->io->writeBufSize[0] = bufferMul * cfg->packetsPerIteration * cfg->packetSize;
+
+	// TODO: float packetRate = ();	
 	if (((float) bufferMul * cfg->packetsPerIteration) / (float) 12207 > targetSeconds) {
 		fprintf(stderr, "ERROR: Requested time is less than the size of a single buffer(%f vs %f); increase -s or decrease -m, exiting.\n", ((float) cfg->io->writeBufSize[0] / cfg->packetSize) / (float) 12207, targetSeconds);
+		ilt_dada_cleanup(cfg);
 		return 1;
 	}
 	cfg->io->dadaConfig.nbufs = targetSeconds * 12207 / cfg->packetsPerIteration / bufferMul;
 
-	printf("Setting up networking...\n");
-	if (ilt_dada_setup(cfg, cfg->bufAssumePacketLength > 0) < 0) {
+
+	if (ilt_dada_cli_check_times(startTime, endTime, obsSeconds, ignoreTimeCheck, minStartup) < 0) {
 		ilt_dada_cleanup(cfg);
 		return 1;
 	}
 
-	// If we haven't been passed a time, set it to the current time.
-	if (strcmp(startTime, "") == 0) {
-		time_t currTime;
-		time(&currTime);
-		strftime(startTime, sizeof startTime, "%Y-%m-%dT%H:%M:%S", gmtime(&currTime));
+	printf("Setting up networking");
+	if (cfg->packetSize != -1) {
+		printf(" and ringbuffers");
+	}
+	printf(".\n");
 
-		printf("INFO: Input time not set, setting start time to %s\n.", startTime);
+	if (ilt_dada_setup(cfg, cfg->packetSize != -1) < 0) {
+		ilt_dada_cleanup(cfg);
+		return 1;
 	}
 
+	// TODO: Rework / add clock bit flag so we can test this before we enter a sleep state
 	// Convert the start time to a packet
 	cfg->startPacket = lofar_udp_time_get_packet_from_isot(startTime, cfg->obsClockBit);
 
 	if (strcmp(endTime, "") != 0) {
 		cfg->endPacket = lofar_udp_time_get_packet_from_isot(endTime, cfg->obsClockBit);
 
-		if (obsSeconds != 60.0f) {
-			fprintf(stderr, "WARNING: Ignoring input observation length (%f) and using input end time instead (%s).\n", obsSeconds, endTime);
-		}
-	} else {
-		cfg->endPacket = cfg->startPacket + (obsSeconds * (clock160MHzPacketRate * (1 - cfg->obsClockBit) + clock200MHzPacketRate * cfg->obsClockBit));
 	}
 
 
-
 	if (cfg->packetSize != packetSizeCopy && packetSizeCopy != -1) {
-		fprintf(stderr, "ERROR: Provided packet length differs from obseved packet length (%d vs %d), this may cause issues. Attempting to continue...\n", cfg->bufAssumePacketLength, cfg->packetSize);
+		fprintf(stderr, "ERROR: Provided packet length differs from obseved packet length (%d vs %d), this may cause issues. Attempting to continue...\n", packetSizeCopy, cfg->packetSize);
 	}
 
 	printf("Preparing ILTDada to record data from port %d, consuming %d packets per iteration.\n", cfg->portNum, cfg->packetsPerIteration);
@@ -149,4 +161,67 @@ int main(int argc, char  *argv[]) {
 
 	printf("Observation finished, cleaning up.\n");
 	ilt_dada_cleanup(cfg);
+}
+
+time_t unixTimeFromString(char *inputStr) {
+	struct tm tmTime;
+	
+	if (strptime(inputStr, "%Y-%m-%dT%H:%M:%S", &tmTime) == NULL) {
+		return -1;
+	}
+
+	return mktime(&tmTime);
+}
+
+int ilt_dada_cli_check_times(char *startTime, char *endTime, double obsSeconds, int ignoreTimeCheck, int minStartup) {
+	time_t currTime, startUnixTime, endUnixTime;
+	time(&currTime);
+	// If we haven't been passed a time, set it to the current time.
+	if (strcmp(startTime, "") == 0) {
+		strftime(startTime, sizeof startTime, "%Y-%m-%dT%H:%M:%S", gmtime(&currTime));
+
+		printf("INFO: Input time not set, setting start time to current time of %s\n.", startTime);
+	}
+
+	
+	if ((startUnixTime = unixTimeFromString(startTime)) == -1) {
+		fprintf(stderr, "ERROR: Failed to convert input start time %s to a unix timstamp, exiting.\n", startTime);
+		return 1;
+	}
+
+	if (strcmp(endTime, "") == 0) {
+		endUnixTime = startUnixTime + obsSeconds;
+		strftime(endTime, sizeof endTime, "%Y-%m-%dT%H:%M:%S", gmtime(&endUnixTime));
+
+		printf("INFO: End time set to %s\n.", endTime);
+	} else {
+		if ((endUnixTime = unixTimeFromString(endTime)) == -1) {
+			fprintf(stderr, "ERROR: Failed to convert input end time %s to a unix timstamp, exiting.\n", endTime);
+			return -1;
+		}
+
+		if (obsSeconds != 60.0f) {
+			fprintf(stderr, "WARNING: Ignoring input observation length (%lf) and using input end time instead (%s).\n", obsSeconds, endTime);
+		}
+	}
+
+	if (!ignoreTimeCheck) {
+		if (currTime > endUnixTime) {
+			fprintf(stderr, "ERROR: End time %s has already passed, exiting.\n\n", endTime);
+			return -1;
+		}
+	}
+
+
+	if (endUnixTime < startUnixTime) {
+		fprintf(stderr, "ERROR: End time %s is before start time %s, exiting.\n", endTime, startTime);
+		return -1;
+	}
+
+	if ((startUnixTime - currTime) > minStartup) {
+		printf("Observation starts in %ld seconds, sleeping until %d seconds before the start time.\n", (startUnixTime - currTime), minStartup);
+		ilt_dada_sleep(startUnixTime - currTime);
+	}
+
+	return 0;
 }

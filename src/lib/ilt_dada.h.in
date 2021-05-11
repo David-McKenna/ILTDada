@@ -92,7 +92,6 @@ typedef struct ilt_dada_config {
 
 	// ILTDada runtime options
 	int forceStartup;
-	int bufAssumePacketLength;
 	int checkInitParameters;
 	int checkInitData;
 	int checkParameters;
@@ -142,6 +141,8 @@ void ilt_dada_cleanup(ilt_dada_config *config);
 int ilt_dada_check_config(ilt_dada_config *config);
 int ilt_dada_check_network(ilt_dada_config *config);
 int ilt_dada_check_header(ilt_dada_config *config, unsigned char* buffer);
+
+void ilt_dada_sleep(double seconds);
 
 int ilt_dada_operate(ilt_dada_config *config);
 int ilt_dada_operate_loop(ilt_dada_config *config);
