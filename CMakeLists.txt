@@ -37,7 +37,7 @@ include(FetchContent)
 
 FetchContent_Declare(udpPacketManager
                      GIT_REPOSITORY https://github.com/David-McKenna/udpPacketManager.git
-                     GIT_TAG c1b1cfb53d9d36b29c161701024f8458c40d326b
+                     GIT_TAG 3fad453e9f05f986579ba0e88dc1a0005115d67b
                      )
 
 FetchContent_MakeAvailable(udpPacketManager)
@@ -88,7 +88,7 @@ target_link_libraries(ilt_dada_fill_buffer PUBLIC iltdada)
 
 include(CMakePackageConfigHelpers)
 write_basic_package_version_file(
-		lofudpmanConfigVersion.cmake
+		iltdadaConfigVersion.cmake
 		VERSION ${PACKAGE_VERSION}
 		COMPATIBILITY AnyNewerVersion
 )
