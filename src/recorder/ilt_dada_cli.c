@@ -12,8 +12,8 @@ void helpMessgaes() {
 	printf("-k (int):	Output PSRDADA Ringbuffer key (default: %d)\n\n", DEF_PORT);
 
 	printf("-n (int):   Number of packets per network operation (default: 256)\n");
-	printf("-m (int):   Number of blocks in the ringbuffer (default: 64)\n");
-	printf("-s (float): Target buffer length in seconds (alternative to -m, default: 5.0)\n\n");
+	printf("-m (int):   Number of packets blocks per segment of the ringbuffer (default: 64)\n");
+	printf("-s (float): Target ringbuffer length in seconds (determines number of segments in the ringbuffer, default: 5.0)\n\n");
 
 	printf("-r (int):   Number of read clients (default: 1)\n");
 	printf("-e      :   Allocate the ringbuffer immediately (default: false)\n");
@@ -49,7 +49,6 @@ int main(int argc, char  *argv[]) {
 	int bufferMul = 64, packetSizeCopy = -1, minStartup = 60, ignoreTimeCheck = 0;
 	float targetSeconds = 5.0f, obsSeconds = 10.0f;
 	char startTime[DEF_STR_LEN] = "", endTime[DEF_STR_LEN] = "";
-	time_t startUnixTime, endUnixTime;
 
 	while ((inputOpt = getopt(argc, argv, "p:k:n:m:s:r:efS:T:t:C")) != -1) {
 		switch (inputOpt) {
@@ -132,6 +131,7 @@ int main(int argc, char  *argv[]) {
 		return 1;
 	}
 	cfg->io->dadaConfig.nbufs = targetSeconds * 12207 / cfg->packetsPerIteration / bufferMul;
+	printf("%d, %ld, %d, %f -> %ld\n", bufferMul, cfg->io->dadaConfig.nbufs, cfg->packetsPerIteration, targetSeconds, cfg->io->writeBufSize[0]);
 
 
 	if (ilt_dada_cli_check_times(startTime, endTime, obsSeconds, ignoreTimeCheck, minStartup) < 0) {

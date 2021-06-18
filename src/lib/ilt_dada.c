@@ -207,8 +207,9 @@ int ilt_dada_initialise_port(ilt_dada_config *config) {
 						        "ERROR: This may be due to your maximum socket buffer being too low, but we could not read /proc/sys/net/core/rmem_max to verify this.\n");
 					}
 					fprintf(stderr,
-					        "ERROR: You require root access to this machine resolve this issue. Please run the commands `echo 'net.core.rmem_max=%ld' | [sudo] tee -a /etc/sysctl.conf` and `[sudo] sysctl -p` to change your kernel properties.\n",
+					        "ERROR: You require root access to this machine resolve this issue. Please run the commands `echo 'net.core.rmem_max=%ld' | [sudo] tee -a /etc/sysctl.conf; sudo sysctl -p` to change your kernel properties.\n",
 					        (2 * config->portBufferSize - 1));
+					fprintf(stderr, "See the README.md for more details on this change.\n");
 					fclose(rmemMax);
 				}
 				cleanup_initialise_port(serverInfo, sockfd_init);

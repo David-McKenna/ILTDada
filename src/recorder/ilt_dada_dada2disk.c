@@ -60,7 +60,7 @@ int main(int argc, char  *argv[]) {
 				break;
 
 			case 'f':
-				wrtConfig->appendExisting = 1;
+				wrtConfig->progressWithExisting = 1;
 				break;
 
 
