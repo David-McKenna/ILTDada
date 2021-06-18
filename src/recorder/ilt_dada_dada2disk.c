@@ -81,7 +81,7 @@ int main(int argc, char  *argv[]) {
 
 
 	if (ringbufferOffset == 1 || ringbufferOffset == -1) {
-		fprintf(stderr, "ERROR: Ringubffer offset set to %d, but this will result in overlapping ringbuffers and DADA headers, exiting.\n", ringbufferOffset);
+		fprintf(stderr, "ERROR: Ringbuffer offset set to %d, but this will result in overlapping ringbuffers and DADA headers, exiting.\n", ringbufferOffset);
 		return 1;
 	}
 

@@ -1,7 +1,7 @@
 #include "ilt_dada.h"
 #include <limits.h>
 
-
+// Operations struct defaults
 const ilt_dada_operate_params ilt_dada_operate_params_default = {
 	.packetBuffer = NULL,
 	.msgvec = NULL,
@@ -16,6 +16,7 @@ const ilt_dada_operate_params ilt_dada_operate_params_default = {
 	.bytesWritten = 0
 };
 
+// Configuration struct defaults
 const ilt_dada_config ilt_dada_config_default = {
 
 	// UDP configuration
@@ -38,9 +39,8 @@ const ilt_dada_config ilt_dada_config_default = {
 	.startPacket = -1,
 	.endPacket = -1,
 	.currentPacket = -1,
-	.packetsPerIteration = 256, // ~0.67 seconds of data
+	.packetsPerIteration = 256, // ~0.021 seconds of data
 	.obsClockBit= -1,
-	.obsBitMode = -1,
 
 
 
@@ -50,8 +50,11 @@ const ilt_dada_config ilt_dada_config_default = {
 
 	.params = NULL,
 	.io = NULL,
-	.io_setup = 0,
+	.state = 0,
 };
+
+
+// Sleep function wrapper
 void ilt_dada_sleep(double seconds) {
 	printf("Sleeping for %lf seconds.\n", seconds);
 
@@ -59,7 +62,12 @@ void ilt_dada_sleep(double seconds) {
 	nanosleep(&sleep, NULL);
 }
 
+
+// Allocate and initialise the configuration, operations and I/O structs
 ilt_dada_config* ilt_dada_init() {
+
+
+	// Allocate and null-check the main struct
 	ilt_dada_config *config = calloc(1, sizeof(ilt_dada_config));
 
 	if (config == NULL) {
@@ -67,16 +75,22 @@ ilt_dada_config* ilt_dada_init() {
 		return NULL;
 	} 
 
+	// Assign the default values
 	*(config) = ilt_dada_config_default;
 
+	// Allocate an null-check the operations and I/O structs
 	config->params = calloc(1, sizeof(ilt_dada_operate_params));
 	config->io = calloc(1, sizeof(lofar_udp_io_write_config));
 
 	if (config->params == NULL || config->io == NULL) {
 		fprintf(stderr, "ERROR: Failed to allocate memory for configuration struct components, exiting.\n");
+		FREE_NOT_NULL(config->params);
+		FREE_NOT_NULL(config->io);
+		FREE_NOT_NULL(config);
 		return NULL;
 	}
 
+	// Assign the default values, adapted for the recorder
 	*(config->io) = lofar_udp_io_write_config_default;
 	*(config->params) = ilt_dada_operate_params_default;
 	config->io->readerType = DADA_ACTIVE;
@@ -85,161 +99,172 @@ ilt_dada_config* ilt_dada_init() {
 }
 
 /**
- * @brief      Initialise a UDP network docket on the gien port number and
- *             expand the kernel buffer to the given size (in bytes)
+ * @brief      Initialise a UDP network socket on the given port number and
+ *             expand the kernel buffer to the required size (in bytes)
  *
  * @param      config  The configuration struct
  *
- * @return     sockfd (success) / -1 (failure) / -2 (unresolveable failure)
+ * @return     0 (success) / -1 (failure) / -2 (unresolvable failure)
  */
 int ilt_dada_initialise_port(ilt_dada_config *config) {
-	// http://beej.us/guide/bgnet/pdf/bgnet_usl_c_1.pdf
-	// >>> The place most people get stuck around here is what order to call 
-	// >>> these things in. In that, the man pages are no use, as you’ve 
-	// >>> probably discovered.
-	// Can confirm. This document is a life saver.
+	if (!(config->state & NETWORK_READY)) {
+		// http://beej.us/guide/bgnet/pdf/bgnet_usl_c_1.pdf
+		// >>> The place most people get stuck around here is what order to call
+		// >>> these things in. In that, the man pages are no use, as you’ve
+		// >>> probably discovered.
+		// Can confirm. This document is a life saver.
 
-	// Ensure we aren't trying to bind to a reserved port
-	// Kernel recommends using ports between 1024 and 49151
-	if (config->portNum < 1023 || config->portNum > 49152) {
-		fprintf(stderr, "ERROR: Requested a reserved port (%d). Exiting.\n", config->portNum);
-		return -2;
-	}
+		// Ensure we aren't trying to bind to a reserved port
+		// Kernel recommends using ports between 1024 and 49151
+		if (config->portNum < 1023 || config->portNum > 49152) {
+			fprintf(stderr, "ERROR: Requested a reserved port (%d). Exiting.\n", config->portNum);
+			return -2;
+		}
 
-	// Bind to an IPv4 or IPv6 connection, using UDP packet paradigm, on a
-	// wildcard address
-	struct addrinfo addressInfo = {
-		.ai_family = AF_UNSPEC,
-		.ai_socktype = SOCK_DGRAM,
-		.ai_flags = IPPROTO_UDP | AI_PASSIVE
-	};
+		// Bind to an IPv4 or IPv6 connection, using UDP packet paradigm, on a
+		// wildcard address
+		struct addrinfo addressInfo = {
+			.ai_family = AF_UNSPEC,
+			.ai_socktype = SOCK_DGRAM,
+			.ai_flags = IPPROTO_UDP | AI_PASSIVE
+		};
 
-	// Convert the port to a string for getaddrinfo
-	char portNumStr[16];
-	sprintf(portNumStr, "%d", config->portNum);
+		// Convert the port to a string for getaddrinfo
+		char portNumStr[16];
+		sprintf(portNumStr, "%d", config->portNum);
 
-	// Struct to collect the results from getaddrinfo
-	struct addrinfo *serverInfo;
-	int status;
+		// Struct to collect the results from getaddrinfo
+		struct addrinfo *serverInfo;
+		int status;
 
-	// Populate the remaining parts of addressInfo
-	if ((status = getaddrinfo(NULL, portNumStr, &addressInfo, &serverInfo)) < 0) {
-		fprintf(stderr, "ERROR: Failed to get address info on port %d (errno %d: %s).", config->portNum, status, gai_strerror(status));
-		return -1;
-	}
+		// Populate the remaining parts of addressInfo
+		if ((status = getaddrinfo(NULL, portNumStr, &addressInfo, &serverInfo)) < 0) {
+			fprintf(stderr, "ERROR: Failed to get address info on port %d (errno %d: %s).", config->portNum, status, gai_strerror(status));
+			return -1;
+		}
 
 
-	// Build our socket from the results of getaddrinfo
-	int sockfd_init = -1;
-	if ((sockfd_init = socket(serverInfo->ai_family, serverInfo->ai_socktype, serverInfo->ai_flags)) == -1) {
-		fprintf(stderr, "ERROR: Failed to build socket on port %d (errno %d: %s).", config->portNum, errno, strerror(errno));
-		cleanup_initialise_port(serverInfo, sockfd_init);
-		return -1;
-	}
-
-	// Attempt to bind to the socket
-	if (config->recvflags != -1) {  
-		if (bind(sockfd_init, serverInfo->ai_addr, serverInfo->ai_addrlen) == -1) {
-			fprintf(stderr, "ERROR: Failed to bind to port %d (errno %d: %s).", config->portNum, errno, strerror(errno));
+		// Build our socket from the results of getaddrinfo
+		int sockfd_init = -1;
+		if ((sockfd_init = socket(serverInfo->ai_family, serverInfo->ai_socktype, serverInfo->ai_flags)) == -1) {
+			fprintf(stderr, "ERROR: Failed to build socket on port %d (errno %d: %s).", config->portNum, errno, strerror(errno));
 			cleanup_initialise_port(serverInfo, sockfd_init);
 			return -1;
 		}
-	}
 
-	// We have successfuly build and binded to a socket, let's tweak some of
-	// it's parameters
-	
-
-	// Check if the port buffer is larger than the requested buffer size.
-	// We willthen increase the buffer size if it is smaller than bufferSize
-	//
-	// getsockopt will return 2x the actual buffer size, as it includes extra
-	// space to account for the kernel overheads, hense the need to double
-	// bufferSize in this comparison
-	//
-	// https://linux.die.net/man/7/socket 
-	// https://linux.die.net/man/2/setsockopt
-	long optVal = 0;
-	unsigned int optLen = sizeof(optVal);
-	if (getsockopt(sockfd_init, SOL_SOCKET, SO_RCVBUF, &optVal, &optLen) == -1) {
-		fprintf(stderr, "ERROR: Failed to get buffer size on port %d (errno%d: %s).\n", config->portNum, errno, strerror(errno));
-		cleanup_initialise_port(serverInfo, sockfd_init);
-		return -1;
-	}
-
-	if (optVal < (2 * config->portBufferSize - 1)) {	
-		if (setsockopt(sockfd_init, SOL_SOCKET, SO_RCVBUF, &(config->portBufferSize), sizeof(config->portBufferSize)) == -1) {
-			fprintf(stderr, "ERROR: Failed to adjust buffer size on port %d (errno%d: %s).\n", config->portNum, errno, strerror(errno));
-			cleanup_initialise_port(serverInfo, sockfd_init);
-			return -1;
-		} else if (getsockopt(sockfd_init, SOL_SOCKET, SO_RCVBUF, &optVal, &optLen) == -1) {
-			fprintf(stderr, "ERROR: Unable to validate socket buffer size on port %d (errno %d: %s).\n", config->portNum, errno, strerror(errno));
-			cleanup_initialise_port(serverInfo, sockfd_init);
-			return -1;
-		} else if (optVal < (2 * config->portBufferSize - 1)) {
-			fprintf(stderr, "ERROR: Failed to fully adjust buffer size on port %d (attempted to set to %ld, call returned %ld).\n", config->portNum, config->portBufferSize * 2, optVal);
-			FILE* rmemMax = fopen("/proc/sys/net/core/rmem_max", "r");
-			if (rmemMax != NULL) {
-				long rmemMaxVal;
-				int dummy = fscanf(rmemMax, "%ld", &rmemMaxVal);
-				if (rmemMaxVal < config->portBufferSize) {
-					fprintf(stderr, "ERROR: This was because your kernel has the maximum UDP buffer size set to a lower value than you requested (%ld).\nERROR: Please increase the value stored in /proc/sys/net/core/rmem_max if you want to use a larger buffer.\n", rmemMaxVal);
-				} else if (dummy <= 0) {
-					fprintf(stderr, "ERROR: This may be due to your maximum socket buffer being too low, but we could not read /proc/sys/net/core/rmem_max to verify this.\n");
-				}
-				fprintf(stderr, "ERROR: You require root access to this machine resolve this issue. Please run the commands `echo 'net.core.rmem_max=%ld' | [sudo] tee -a /etc/sysctl.conf` and `[sudo] sysctl -p` to change your kernel properties.\n", (2 * config->portBufferSize - 1));
-				fclose(rmemMax);
+		// Attempt to bind to the socket
+		if (config->recvflags != -1) {
+			if (bind(sockfd_init, serverInfo->ai_addr, serverInfo->ai_addrlen) == -1) {
+				fprintf(stderr, "ERROR: Failed to bind to port %d (errno %d: %s).", config->portNum, errno, strerror(errno));
+				cleanup_initialise_port(serverInfo, sockfd_init);
+				return -1;
 			}
+		}
+
+		// We have successfully build and bound to a socket, let's tweak some of
+		// it's parameters
+
+
+		// Check if the port buffer is larger than the requested buffer size.
+		// We will then increase the buffer size if it is smaller than bufferSize
+		//
+		// getsockopt will return 2x the actual buffer size, as it includes extra
+		// space to account for the kernel overheads, hence the need to double
+		// bufferSize in this comparison
+		//
+		// https://linux.die.net/man/7/socket
+		// https://linux.die.net/man/2/setsockopt
+		long optVal = 0;
+		unsigned int optLen = sizeof(optVal);
+		if (getsockopt(sockfd_init, SOL_SOCKET, SO_RCVBUF, &optVal, &optLen) == -1) {
+			fprintf(stderr, "ERROR: Failed to get buffer size on port %d (errno%d: %s).\n", config->portNum, errno, strerror(errno));
 			cleanup_initialise_port(serverInfo, sockfd_init);
 			return -1;
 		}
-	}
+
+		if (optVal < (2 * config->portBufferSize - 1)) {
+			if (setsockopt(sockfd_init, SOL_SOCKET, SO_RCVBUF, &(config->portBufferSize), sizeof(config->portBufferSize)) == -1) {
+				fprintf(stderr, "ERROR: Failed to adjust buffer size on port %d (errno%d: %s).\n", config->portNum, errno, strerror(errno));
+				cleanup_initialise_port(serverInfo, sockfd_init);
+				return -1;
+			} else if (getsockopt(sockfd_init, SOL_SOCKET, SO_RCVBUF, &optVal, &optLen) == -1) {
+				fprintf(stderr, "ERROR: Unable to validate socket buffer size on port %d (errno %d: %s).\n", config->portNum, errno, strerror(errno));
+				cleanup_initialise_port(serverInfo, sockfd_init);
+				return -1;
+			} else if (optVal < (2 * config->portBufferSize - 1)) {
+				fprintf(stderr, "ERROR: Failed to fully adjust buffer size on port %d (attempted to set to %ld, call returned %ld).\n", config->portNum,
+				        config->portBufferSize * 2, optVal);
+				FILE *rmemMax = fopen("/proc/sys/net/core/rmem_max", "r");
+				if (rmemMax != NULL) {
+					long rmemMaxVal;
+					int dummy = fscanf(rmemMax, "%ld", &rmemMaxVal);
+					if (rmemMaxVal < config->portBufferSize) {
+						fprintf(stderr,
+						        "ERROR: This was because your kernel has the maximum UDP buffer size set to a lower value than you requested (%ld).\nERROR: Please increase the value stored in /proc/sys/net/core/rmem_max if you want to use a larger buffer.\n",
+						        rmemMaxVal);
+					} else if (dummy <= 0) {
+						fprintf(stderr,
+						        "ERROR: This may be due to your maximum socket buffer being too low, but we could not read /proc/sys/net/core/rmem_max to verify this.\n");
+					}
+					fprintf(stderr,
+					        "ERROR: You require root access to this machine resolve this issue. Please run the commands `echo 'net.core.rmem_max=%ld' | [sudo] tee -a /etc/sysctl.conf` and `[sudo] sysctl -p` to change your kernel properties.\n",
+					        (2 * config->portBufferSize - 1));
+					fclose(rmemMax);
+				}
+				cleanup_initialise_port(serverInfo, sockfd_init);
+				return -1;
+			}
+		}
 
 
-	// Without root permisisons we can increase the port priority up to 6 
-	// If we are below the value set by portPriority, adjust the port priority 
-	// to the given value
-	if (getsockopt(sockfd_init, SOL_SOCKET, SO_PRIORITY, &optVal, &optLen) == -1) {
-		fprintf(stderr, "ERROR: Failed to get port priority on port %d (errno%d: %s).\n", config->portNum, errno, strerror(errno));
-		cleanup_initialise_port(serverInfo, sockfd_init);
-		return -1;
-	}
-
-	if (optVal < config->portPriority) {
-		if (setsockopt(sockfd_init, SOL_SOCKET, SO_PRIORITY, &(config->portPriority), sizeof(config->portPriority)) == -1) {
-			fprintf(stderr, "ERROR: Failed to adjust port priority on port %d (errno%d: %s).\n", config->portNum, errno, strerror(errno));
+		// Without root permissions we can increase the port priority up to 6
+		// If we are below the value set by portPriority, adjust the port priority
+		// to the given value
+		if (getsockopt(sockfd_init, SOL_SOCKET, SO_PRIORITY, &optVal, &optLen) == -1) {
+			fprintf(stderr, "ERROR: Failed to get port priority on port %d (errno%d: %s).\n", config->portNum, errno, strerror(errno));
 			cleanup_initialise_port(serverInfo, sockfd_init);
 			return -1;
 		}
+
+		if (optVal < config->portPriority) {
+			if (setsockopt(sockfd_init, SOL_SOCKET, SO_PRIORITY, &(config->portPriority), sizeof(config->portPriority)) == -1) {
+				fprintf(stderr, "ERROR: Failed to adjust port priority on port %d (errno%d: %s).\n", config->portNum, errno, strerror(errno));
+				cleanup_initialise_port(serverInfo, sockfd_init);
+				return -1;
+			}
+		}
+
+
+		// Allow the port to be re-used, encase we are slow to cleanup after the end
+		// of our observation (either on our end or the process consuming the ringbuffer).
+		const int allowReuse = 1;
+		if (setsockopt(sockfd_init, SOL_SOCKET, SO_REUSEADDR, &allowReuse, sizeof(allowReuse)) == -1) {
+			fprintf(stderr, "ERROR: Failed to set port re-use property on port %d (errno%d: %s).\n", config->portNum, errno, strerror(errno));
+			cleanup_initialise_port(serverInfo, sockfd_init);
+			return -1;
+		}
+
+		// Set a hard cap on the timeout for recieving data from the socket. We can't fully
+		// 	trust recvmmsg here due to a known bug where the N_packs - 1 packet may block
+		// 	infinitely if it is never recieved
+		// 	https://man7.org/linux/man-pages/man2/recvmmsg.2.html#bugs
+		// 	I wasn't able to confirm that this actually worked, and ran into other issues with timeouts
+		// 	so this is comments out for now.
+		const struct timeval timeout = { .tv_sec = (int) (config->portTimeout / 1), .tv_usec = (int) ((config->portTimeout - ((int) config->portTimeout)) *
+		                                                                                              1e6) };
+		if (setsockopt(sockfd_init, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) == -1) {
+			fprintf(stderr, "ERROR: Failed to set timeout on port %d (errno%d: %s).\n", config->portNum, errno, strerror(errno));
+			cleanup_initialise_port(serverInfo, sockfd_init);
+			return -1;
+		}
+
+		// Cleanup the addrinfo linked list before returning
+		cleanup_initialise_port(serverInfo, -1);
+		// Return the socket fd and exit
+		config->sockfd = sockfd_init;
+		config->state |= NETWORK_READY;
 	}
 
-
-	// Allow the port to be re-used, encase we are slow to cleanup after the end
-	// of our observation (either on our end or the process consuming the ringbuffer).
-	const int allowReuse = 1;
-	if (setsockopt(sockfd_init, SOL_SOCKET, SO_REUSEADDR, &allowReuse, sizeof(allowReuse)) == -1) {
-		fprintf(stderr, "ERROR: Failed to set port re-use property on port %d (errno%d: %s).\n", config->portNum, errno, strerror(errno));
-		cleanup_initialise_port(serverInfo, sockfd_init);
-		return -1;
-	}
-
-	// Set a hard cap on the timeout for recieving data from the socket. We can't fully
-	// 	trust recvmmsg here due to a known bug where the N_packs - 1 packet may block
-	// 	infinitely if it is never recieved
-	// 	https://man7.org/linux/man-pages/man2/recvmmsg.2.html#bugs 
-	// 	I wasn't able to confirm that this actually worked, and ran into other issues with timeouts
-	// 	so this is comments out for now.
-	const struct timeval timeout =  { .tv_sec = (int) (config->portTimeout / 1 ), .tv_usec = (int) ((config->portTimeout - ((int) config->portTimeout)) * 1e6) };
-	if (setsockopt(sockfd_init, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) == -1) {
-		fprintf(stderr, "ERROR: Failed to set timeout on port %d (errno%d: %s).\n", config->portNum, errno, strerror(errno));
-		cleanup_initialise_port(serverInfo, sockfd_init);
-		return -1;
-	}
-
-	// Cleanup the addrinfo linked list before returning
-	cleanup_initialise_port(serverInfo, -1);
-	// Return the socket fd and exit
-	config->sockfd = sockfd_init;
 	return 0;
 }
 
@@ -265,6 +290,7 @@ void cleanup_initialise_port(struct addrinfo *serverInfo, int sockfd_init) {
 
 // Ringbuffer References:
 // http://psrdada.sourceforge.net/manuals/Specification.pdf (outdated and many examples no longer work)
+// More luck looking at the headers/code:
 // https://sourceforge.net/p/psrdada/code/ci/master/tree/src/dada_hdu.h
 // https://sourceforge.net/p/psrdada/code/ci/master/tree/src/ipcio.h
 // https://sourceforge.net/p/psrdada/code/ci/master/tree/src/multilog.h
@@ -292,22 +318,21 @@ int ilt_dada_check_config(ilt_dada_config *config) {
  */
 int ilt_dada_setup(ilt_dada_config *config, int setup_io) {
 
+	// Sanity check the input
 	if (ilt_dada_check_config(config) < 0) {
 		return -1;
 	}
 
+	// Initialise the network
 	if (ilt_dada_initialise_port(config) < 0) {
 		return -1;
 	}
 
+	// If requested, initialise the ringbuffer now
 	if (setup_io) {
 		if (ilt_dada_setup_ringbuffer(config) < 0) {
 			return -1;
 		}
-	}
-
-	if (ilt_dada_check_network(config) < 0) {
-		return -1;
 	}
 
 	return 0;
@@ -317,19 +342,23 @@ int ilt_dada_setup(ilt_dada_config *config, int setup_io) {
 
 /**
  * @brief      Verify the provided configuration matches the packets we're
- *             recieving
+ *             receiving
  *
- * @param[in]  sockfd  The socket file descriptor
  * @param      config  The configuration struct
  *
  * @return     0 (success) / -1 (failure) / -2 (metadata mismatch) / -3 (all data is 0-valued)
  */
-int ilt_dada_check_network(ilt_dada_config *config) {
+int ilt_dada_check_network(ilt_dada_config *config, int flags) {
 
 	// Read the first packet in the queue into the buffer
 	unsigned char buffer[MAX_UDP_LEN];
-	if (recvfrom(config->sockfd, &buffer[0], MAX_UDP_LEN, MSG_PEEK, NULL, NULL) == -1) {
+	ssize_t recvreturn;
+	if ((recvreturn = recvfrom(config->sockfd, &buffer[0], MAX_UDP_LEN, MSG_PEEK | flags, NULL, NULL)) == -1) {
 		fprintf(stderr, "ERROR: Unable to peek at first packet (errno %d, %s).", errno, strerror(errno));
+		if (errno == EAGAIN || errno == EWOULDBLOCK) {
+			fprintf(stderr, "ERROR: This was an indication that no packets were available to be consumed. Attempting to continue.\n");
+			return -2;
+		}
 		return -1;
 	}
 
@@ -362,7 +391,6 @@ int ilt_dada_check_network(ilt_dada_config *config) {
 	}
 
 	config->obsClockBit = source->clockBit;
-	config->obsBitMode = source->bitMode;
 	// 16 + (61,122,244) * 16 * 4 / (0.5 1, 2)
 	// Max == 7824
 	config->packetSize = (int) (UDPHDRLEN + buffer[6] * buffer[7] * ((float) UDPNPOL / (source->bitMode ? source->bitMode : 0.5)));
@@ -372,6 +400,7 @@ int ilt_dada_check_network(ilt_dada_config *config) {
 	// Offset by 1 to account for the fact we will read this packet again (since we used MSG_PEEK)
 	config->currentPacket = lofar_udp_time_beamformed_packno(*((unsigned int*) &(buffer[8])), *((unsigned int*) &(buffer[12])), source->clockBit) - 1; 
 
+	config->state |= NETWORK_CHECKED;
 	return 0;
 }
 
@@ -419,7 +448,7 @@ int ilt_dada_check_header(ilt_dada_config *config, unsigned char* buffer) {
 		}
 
 		// Check that the clock and bitmodes are the expected values
-		// No logner checked, using these as the source of the data
+		// No longer checked, using these as the source of the data
 		/*
 		if (source->clockBit != config->obsClockBit && config->obsClockBit != (unsigned char) -1) {
 			fprintf(stderr, "ERROR: RSP reports a different clock than expected on port %d (expected %d, got %d).", config->portNum, config->obsClockBit, source->clockBit);
@@ -458,7 +487,7 @@ int ilt_dada_connect_and_destroy_ringbuffer(int key) {
 }
 
 int ilt_dada_setup_ringbuffer(ilt_dada_config *config) {
-	if (!config->io_setup) {
+	if (!(config->state & RINGBUFFER_READY)) {
 		if (lofar_udp_io_write_setup(config->io, 0) < 0) {
 			if (config->forceStartup) {
 				fprintf(stderr, "ERROR: Failed to attach to given ringbuffer %d, attempting to destroy given keys and then will try to connect again.\n", config->io->outputDadaKeys[0]);
@@ -486,8 +515,9 @@ int ilt_dada_setup_ringbuffer(ilt_dada_config *config) {
 				return -1;
 			}
 		}
-		config->io_setup = 1;
+		config->state |= RINGBUFFER_READY;
 	}
+
 
 	return 0;
 }
@@ -496,7 +526,11 @@ int ilt_dada_setup_ringbuffer(ilt_dada_config *config) {
 
 int ilt_dada_operate(ilt_dada_config *config) {
 
-	if (!config->io_setup) {
+	if (!(config->state & NETWORK_READY)) {
+		fprintf(stderr, "ERROR: Network has not yet been initialised. Exiting.\n");
+		return -1;
+	}
+	if (!(config->state & RINGBUFFER_READY)) {
 		if (ilt_dada_setup_ringbuffer(config) < 0) {
 			return -1;
 		}
@@ -519,10 +553,10 @@ int ilt_dada_operate(ilt_dada_config *config) {
 	printf("Prepare\n");
 	if (ilt_data_operate_prepare(config) < 0) {
 		return -1;
-	} 
+	}
 
 	printf("Network\n");
-	if (ilt_dada_check_network(config) < 0) {
+	if (ilt_dada_check_network(config, 0) < 0) {
 		ilt_dada_operate_cleanup(config);
 		return -1;
 	}
@@ -548,6 +582,7 @@ int ilt_dada_operate(ilt_dada_config *config) {
 	}
 
 	// Print debug information about the observing run
+	printf("Observation completed. Cleaning up. Final summary:\n");
 	ilt_dada_packet_comments(config->io->dadaWriter[0].multilog, config->portNum, config->currentPacket, config->startPacket, config->endPacket, config->params->packetsLastExpected, config->params->packetsLastSeen, config->params->packetsExpected, config->params->packetsSeen);
 
 
@@ -578,7 +613,7 @@ int ilt_dada_operate_loop(ilt_dada_config *config) {
 	int readPackets, localLoops = 0;
 	long finalPacketOffset = (config->packetsPerIteration - 1) * config->packetSize;
 	long lastPacket;
-	size_t writeBytes, writtenBytes;
+	ssize_t writeBytes, writtenBytes;
 
 
 	// If we're starting early or the buffer started filling early, consume data until we reach the starting packet
@@ -588,7 +623,7 @@ int ilt_dada_operate_loop(ilt_dada_config *config) {
 		lastPacket = lofar_udp_time_beamformed_packno(*((unsigned int*) &(config->params->packetBuffer[finalPacketOffset + 8])), *((unsigned int*) &(config->params->packetBuffer[finalPacketOffset + 12])), ((lofar_source_bytes*) &(config->params->packetBuffer[1]))->clockBit);
 
 		if (lastPacket >= (config->startPacket - config->packetsPerIteration)) {
-			// TOOD: assumes no packets loss
+			// TODO: assumes no packets loss
 			writeBytes = readPackets * config->packetSize;
 			writtenBytes = ipcio_write(config->io->dadaWriter[0].ringbuffer, &(config->params->packetBuffer[0]), writeBytes);
 
@@ -653,7 +688,7 @@ int ilt_dada_operate_loop(ilt_dada_config *config) {
 		// Write the raw packets to the ringbuffer
 		writeBytes = readPackets * config->packetSize;
 		writtenBytes = lofar_udp_io_write(config->io, 0, &(config->params->packetBuffer[0]), writeBytes);
-		printf("%ld, %ld, %ld\n", ipcio_tell(config->io->dadaWriter[0].ringbuffer), ipcio_tell(config->io->dadaWriter[0].ringbuffer) % config->packetSize, ipcio_tell(config->io->dadaWriter[0].ringbuffer) / config->packetSize % 256);
+		VERBOSE(printf("%ld, %ld, %ld\n", ipcio_tell(config->io->dadaWriter[0].ringbuffer), ipcio_tell(config->io->dadaWriter[0].ringbuffer) % config->packetSize, ipcio_tell(config->io->dadaWriter[0].ringbuffer) / config->packetSize % 256));
 
 		// Check that all the packets were written
 		if (writtenBytes < 0) {
@@ -795,7 +830,7 @@ void ilt_dada_cleanup(ilt_dada_config *config) {
 	}
 
 	lofar_udp_io_write_cleanup(config->io, 0, 1);
-	config->io_setup = 0;
+	config->state = UNINITIALISED;
 	FREE_NOT_NULL(config->params);
 	FREE_NOT_NULL(config->io);
 	FREE_NOT_NULL(config);

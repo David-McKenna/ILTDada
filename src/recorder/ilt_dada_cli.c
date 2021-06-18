@@ -1,24 +1,34 @@
 #include "ilt_dada_cli.h"
 
-#define DEF_PORT 16130
-
 time_t unixTimeFromString(char *inputStr);
 int ilt_dada_cli_check_times(char *startTime, char *endTime, double obsSeconds, int ignoreTimeCheck, int minStartup);
 
 void helpMessgaes() {
 	printf("ILTDada CLI (CLI v%s, lib %s)\n\n", ILTD_CLI_VERSION, ILTD_VERSION);
 
+	printf("-h      :   Display this message\n\n");
+
 	printf("-p (int):	UDP port to monitor (default: %d)\n", DEF_PORT);
 	printf("-k (int):	Output PSRDADA Ringbuffer key (default: %d)\n\n", DEF_PORT);
 
-	printf("-n");
-	printf("-m");
-	printf("-s");
-	printf("-r");
+	printf("-n (int):   Number of packets per network operation (default: 256)\n");
+	printf("-m (int):   Number of blocks in the ringbuffer (default: 64)\n");
+	printf("-s (float): Target buffer length in seconds (alternative to -m, default: 5.0)\n\n");
 
-	printf("-S");
+	printf("-r (int):   Number of read clients (default: 1)\n");
+	printf("-e      :   Allocate the ringbuffer immediately (default: false)\n");
+	printf("-f      :   Force allocate the ringbuffer (remove existing ringbuffer on given key) (default: false)\n\n");
+
+	printf("-S (str):   ISOT Start Time (YYYY-MM-DDTHH:MM:SS, default '')\n");
 	printf("-T (str):	ISOT End time (YYYY-MM-DDTHH:MM:SS, default '')\n");
 	printf("-t (float):	Observation length in seconds (default: 60s)\n");
+	printf("-w (float): Time buffer between accepting packets and starting recording (process will sleep until N seconds before observation, default: 10s)\n");
+
+
+	/* Undocumented / debug only
+	printf("-C     :    Disable end of observation time check\n");
+
+	 */
 }
 
 int main(int argc, char  *argv[]) {
@@ -37,11 +47,11 @@ int main(int argc, char  *argv[]) {
 
 	char inputOpt;
 	int bufferMul = 64, packetSizeCopy = -1, minStartup = 60, ignoreTimeCheck = 0;
-	float targetSeconds = 5.0f, obsSeconds = 60.0f;
+	float targetSeconds = 5.0f, obsSeconds = 10.0f;
 	char startTime[DEF_STR_LEN] = "", endTime[DEF_STR_LEN] = "";
 	time_t startUnixTime, endUnixTime;
 
-	while ((inputOpt = getopt(argc, argv, "p:k:n:m:s:t:S:T:r:fl:w:C")) != -1) {
+	while ((inputOpt = getopt(argc, argv, "p:k:n:m:s:r:efS:T:t:C")) != -1) {
 		switch (inputOpt) {
 
 			case 'p':
@@ -65,8 +75,16 @@ int main(int argc, char  *argv[]) {
 				targetSeconds = atof(optarg);
 				break;
 
-			case 't':
-				obsSeconds = atof(optarg);
+			case 'r':
+				cfg->io->dadaConfig.num_readers = atoi(optarg);
+				break;
+
+			case 'e':
+				cfg->io->progressWithExisting = 1;
+				break;
+
+			case 'f':
+				cfg->forceStartup = 1;
 				break;
 
 			case 'S':
@@ -77,13 +95,11 @@ int main(int argc, char  *argv[]) {
 				strcpy(endTime, optarg);
 				break;
 
-			case 'r':
-				cfg->io->dadaConfig.num_readers = atoi(optarg);
+			case 't':
+				obsSeconds = atof(optarg);
 				break;
 
-			case 'f':
-				cfg->forceStartup = 1;
-				break;
+
 
 			case 'l':
 				cfg->packetSize = atoi(optarg);
@@ -178,7 +194,7 @@ int ilt_dada_cli_check_times(char *startTime, char *endTime, double obsSeconds, 
 	time(&currTime);
 	// If we haven't been passed a time, set it to the current time.
 	if (strcmp(startTime, "") == 0) {
-		strftime(startTime, sizeof startTime, "%Y-%m-%dT%H:%M:%S", gmtime(&currTime));
+		strftime(startTime, DEF_STR_LEN * sizeof(char), "%Y-%m-%dT%H:%M:%S", gmtime(&currTime));
 
 		printf("INFO: Input time not set, setting start time to current time of %s\n.", startTime);
 	}
@@ -191,7 +207,7 @@ int ilt_dada_cli_check_times(char *startTime, char *endTime, double obsSeconds, 
 
 	if (strcmp(endTime, "") == 0) {
 		endUnixTime = startUnixTime + obsSeconds;
-		strftime(endTime, sizeof endTime, "%Y-%m-%dT%H:%M:%S", gmtime(&endUnixTime));
+		strftime(endTime, DEF_STR_LEN * sizeof(char), "%Y-%m-%dT%H:%M:%S", gmtime(&endUnixTime));
 
 		printf("INFO: End time set to %s\n.", endTime);
 	} else {
