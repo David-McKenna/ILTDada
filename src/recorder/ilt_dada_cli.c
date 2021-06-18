@@ -16,7 +16,7 @@ void helpMessgaes() {
 	printf("-s (float): Target ringbuffer length in seconds (determines number of segments in the ringbuffer, default: 5.0)\n\n");
 
 	printf("-r (int):   Number of read clients (default: 1)\n");
-	printf("-e      :   Allocate the ringbuffer immediately (default: false)\n");
+	printf("-e (int):   Allocate the ringbuffer immediately for a given packet size (default: false, recommended: 7824)\n");
 	printf("-f      :   Force allocate the ringbuffer (remove existing ringbuffer on given key) (default: false)\n\n");
 
 	printf("-S (str):   ISOT Start Time (YYYY-MM-DDTHH:MM:SS, default '')\n");
@@ -50,7 +50,7 @@ int main(int argc, char  *argv[]) {
 	float targetSeconds = 5.0f, obsSeconds = 10.0f;
 	char startTime[DEF_STR_LEN] = "", endTime[DEF_STR_LEN] = "";
 
-	while ((inputOpt = getopt(argc, argv, "p:k:n:m:s:r:efS:T:t:C")) != -1) {
+	while ((inputOpt = getopt(argc, argv, "p:k:n:m:s:r:e:fS:T:t:C")) != -1) {
 		switch (inputOpt) {
 
 			case 'p':
@@ -79,11 +79,13 @@ int main(int argc, char  *argv[]) {
 				break;
 
 			case 'e':
-				cfg->io->progressWithExisting = 1;
+				cfg->forceStartup = 1;
+				cfg->packetSize = atoi(optarg);
+				packetSizeCopy = cfg->packetSize;
 				break;
 
 			case 'f':
-				cfg->forceStartup = 1;
+				cfg->io->progressWithExisting = 1;
 				break;
 
 			case 'S':
@@ -98,12 +100,6 @@ int main(int argc, char  *argv[]) {
 				obsSeconds = atof(optarg);
 				break;
 
-
-
-			case 'l':
-				cfg->packetSize = atoi(optarg);
-				packetSizeCopy = atoi(optarg);
-				break;
 
 			case 'w':
 				minStartup = atoi(optarg);
@@ -126,12 +122,11 @@ int main(int argc, char  *argv[]) {
 
 	// TODO: float packetRate = ();	
 	if (((float) bufferMul * cfg->packetsPerIteration) / (float) 12207 > targetSeconds) {
-		fprintf(stderr, "ERROR: Requested time is less than the size of a single buffer(%f vs %f); increase -s or decrease -m, exiting.\n", ((float) cfg->io->writeBufSize[0] / cfg->packetSize) / (float) 12207, targetSeconds);
+		fprintf(stderr, "ERROR: Requested time is less than the size of a single buffer (%f vs %f); increase -s or decrease -m, exiting.\n", ((float) bufferMul * cfg->packetsPerIteration) / (float) 12207, targetSeconds);
 		ilt_dada_cleanup(cfg);
 		return 1;
 	}
 	cfg->io->dadaConfig.nbufs = targetSeconds * 12207 / cfg->packetsPerIteration / bufferMul;
-	printf("%d, %ld, %d, %f -> %ld\n", bufferMul, cfg->io->dadaConfig.nbufs, cfg->packetsPerIteration, targetSeconds, cfg->io->writeBufSize[0]);
 
 
 	if (ilt_dada_cli_check_times(startTime, endTime, obsSeconds, ignoreTimeCheck, minStartup) < 0) {
@@ -161,11 +156,11 @@ int main(int argc, char  *argv[]) {
 
 
 	if (cfg->packetSize != packetSizeCopy && packetSizeCopy != -1) {
-		fprintf(stderr, "ERROR: Provided packet length differs from obseved packet length (%d vs %d), this may cause issues. Attempting to continue...\n", packetSizeCopy, cfg->packetSize);
+		fprintf(stderr, "ERROR: Provided packet length differs from observed packet length (%d vs %d), this may cause issues. Attempting to continue...\n", packetSizeCopy, cfg->packetSize);
 	}
 
 	printf("Preparing ILTDada to record data from port %d, consuming %d packets per iteration.\n", cfg->portNum, cfg->packetsPerIteration);
-	printf("Ring buffer on key  %d (ptr %x) will require %ld MB (%ld GB) of memory to hold ~%ld seconds of data in %" PRIu64 " buffers.\n", cfg->io->outputDadaKeys[0], cfg->io->outputDadaKeys[0], cfg->io->writeBufSize[0] * cfg->io->dadaConfig.nbufs >> 20, cfg->io->writeBufSize[0] * cfg->io->dadaConfig.nbufs >> 30, cfg->packetsPerIteration * cfg->io->dadaConfig.nbufs / 12207, cfg->io->dadaConfig.nbufs);
+	printf("Ring buffer on key %d (ptr %x) will require %ld MB (%ld GB) of memory to hold ~%ld seconds of data in %" PRIu64 " buffers.\n", cfg->io->outputDadaKeys[0], cfg->io->outputDadaKeys[0], cfg->io->writeBufSize[0] * cfg->io->dadaConfig.nbufs >> 20, cfg->io->writeBufSize[0] * cfg->io->dadaConfig.nbufs >> 30, cfg->packetsPerIteration * cfg->io->dadaConfig.nbufs / 12207, cfg->io->dadaConfig.nbufs);
 	printf("Start/End packets will be %ld and %ld.\n\n", cfg->startPacket, cfg->endPacket);
 
 	printf("Preparing to start recording...\n");

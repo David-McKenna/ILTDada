@@ -1,3 +1,5 @@
+#pragma clang diagnostic push
+#pragma ide diagnostic ignored "openmp-use-default-none"
 #include "ilt_dada.h"
 #include <limits.h>
 
@@ -618,39 +620,59 @@ int ilt_dada_operate_loop(ilt_dada_config *config) {
 
 
 	// If we're starting early or the buffer started filling early, consume data until we reach the starting packet
-	printf("First Loop\n");
-	while (config->currentPacket < config->startPacket) {
-		readPackets = recvmmsg(config->sockfd, config->params->msgvec, config->packetsPerIteration, config->recvflags, config->params->timeout);
-		lastPacket = lofar_udp_time_beamformed_packno(*((unsigned int*) &(config->params->packetBuffer[finalPacketOffset + 8])), *((unsigned int*) &(config->params->packetBuffer[finalPacketOffset + 12])), ((lofar_source_bytes*) &(config->params->packetBuffer[1]))->clockBit);
+	if (config->currentPacket > config->startPacket) {
+		// Past the start up time, begin the main loop immediately.
+		printf("Late start-up resulted in %d packets to be missed, starting now.\n");
 
-		if (lastPacket >= (config->startPacket - config->packetsPerIteration)) {
-			// TODO: assumes no packets loss
-			writeBytes = readPackets * config->packetSize;
-			writtenBytes = ipcio_write(config->io->dadaWriter[0].ringbuffer, &(config->params->packetBuffer[0]), writeBytes);
+		// TODO: Make a decision, should thse be included in the stats or not?
+		//config->startPacket = config->currentPacket;
+	} else {
+		printf("Starting warm-up...\n");
+		while (config->currentPacket < config->startPacket) {
+			readPackets = recvmmsg(config->sockfd, config->params->msgvec, config->packetsPerIteration, config->recvflags, config->params->timeout);
+			lastPacket = lofar_udp_time_beamformed_packno(*((unsigned int *) &(config->params->packetBuffer[finalPacketOffset + 8])),
+			                                              *((unsigned int *) &(config->params->packetBuffer[finalPacketOffset + 12])),
+			                                              ((lofar_source_bytes *) &(config->params->packetBuffer[1]))->clockBit);
 
-			if (writtenBytes < 0) {
-				fprintf(stderr, "ERROR Port %d: Failed to write data to ringbuffer %d, exiting.\n", config->portNum, config->io->outputDadaKeys[0]);
-			} else if (writtenBytes != writeBytes) {
-				fprintf(stderr, "WARNING Port %d: Tried to write %ld bytes to buffer but only wrote %ld.\n", config->portNum, writeBytes, writtenBytes);
+			if (lastPacket >= (config->startPacket - config->packetsPerIteration)) {
+				// TODO: assumes no packets loss
+				writeBytes = readPackets * config->packetSize;
+				writtenBytes = ipcio_write(config->io->dadaWriter[0].ringbuffer, &(config->params->packetBuffer[0]), writeBytes);
+
+				if (writtenBytes < 0) {
+					fprintf(stderr, "ERROR Port %d: Failed to write data to ringbuffer %d, exiting.\n", config->portNum, config->io->outputDadaKeys[0]);
+				} else if (writtenBytes != writeBytes) {
+					fprintf(stderr, "WARNING Port %d: Tried to write %ld bytes to buffer but only wrote %ld.\n", config->portNum, writeBytes, writtenBytes);
+				}
+
+				config->params->bytesWritten += writtenBytes;
+				config->params->packetsSeen += readPackets;
+				config->params->packetsExpected += lastPacket - config->currentPacket;
+				config->params->packetsLastSeen += readPackets;
+				config->params->packetsLastExpected += lastPacket - config->currentPacket;
 			}
 
-			//config->params->bytesWritten += writtenBytes;
-			//config->params->packetsSeen += readPackets;
-			//config->params->packetsExpected += lastPacket - config->currentPacket;
-			//config->params->packetsLastSeen += readPackets;
-			//config->params->packetsLastExpected += lastPacket - config->currentPacket;
+			config->currentPacket = lastPacket;
 		}
+		printf("Warmup summary for port %d:\n", config->portNum);
+		#pragma omp task
+		ilt_dada_packet_comments(config->io->dadaWriter[0].multilog, config->portNum, config->currentPacket, config->startPacket, config->endPacket, config->params->packetsLastExpected, config->params->packetsLastSeen, config->params->packetsExpected, config->params->packetsSeen);
 
-		config->currentPacket = lastPacket;
+		// Remove old stats before starting the observations
+		config->params->bytesWritten = 0;
+		config->params->packetsSeen = 0;
+		config->params->packetsExpected = 0;
+		config->params->packetsLastSeen = 0;
+		config->params->packetsLastExpected = 0;
 	}
 
 	// Create a locale variables for packets per iteration, so we can reduce the number for the final step
 	int packetsPerIteration = config->packetsPerIteration;
 
-	printf("Second loop\n");
+	printf("Observation beginning...\n");
 	// While we still have data to record,
 	while (config->currentPacket < config->params->finalPacket) {
-		// Record the next N pckets
+		// Record the next N packets
 		readPackets = recvmmsg(config->sockfd, config->params->msgvec, packetsPerIteration, config->recvflags, config->params->timeout);
 		
 
@@ -667,8 +689,11 @@ int ilt_dada_operate_loop(ilt_dada_config *config) {
 
 		// Check the packets for errors
 		if (config->checkParameters == CHECK_ALL_PACKETS) {
-			for (int packetIdx = 0; packetIdx < readPackets; packetIdx++) {
-				// Sanity check packet contents / flags?
+			for (int packetIdx = 0; packetIdx < (readPackets - 1); packetIdx++) {
+				if (ilt_dada_check_header(config, (unsigned char*) &config->params->packetBuffer[packetIdx * config->packetSize]) < 0) {
+					fprintf(stderr, "ERROR: packet %d port header data corrupted on port %d, exiting.\n\n", packetIdx, config->portNum);
+					return -1;
+				}
 			}
 		} else if (config->checkParameters == CHECK_FIRST_LAST) {
 			if (ilt_dada_check_header(config, (unsigned char*) &config->params->packetBuffer[0]) < 0 || ilt_dada_check_header(config, (unsigned char*) &config->params->packetBuffer[finalPacketOffset]) < 0) {
@@ -680,7 +705,7 @@ int ilt_dada_operate_loop(ilt_dada_config *config) {
 		// Get the last packet number
 		lastPacket = lofar_udp_time_beamformed_packno(*((unsigned int*) &(config->params->packetBuffer[finalPacketOffset + 8])), *((unsigned int*) &(config->params->packetBuffer[finalPacketOffset + 12])), ((lofar_source_bytes*) &(config->params->packetBuffer[1]))->clockBit);
 
-		// Calcualte packet loss / misses / etc.
+		// Calculate packet loss / misses / etc.
 		config->params->packetsSeen += readPackets;
 		config->params->packetsExpected += lastPacket - config->currentPacket;
 		config->params->packetsLastSeen += readPackets;
@@ -836,3 +861,5 @@ void ilt_dada_cleanup(ilt_dada_config *config) {
 	FREE_NOT_NULL(config->io);
 	FREE_NOT_NULL(config);
 }
+
+#pragma clang diagnostic pop
