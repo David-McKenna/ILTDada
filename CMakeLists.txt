@@ -20,7 +20,11 @@ project(ilt_dada 	VERSION 0.1.0
 
 set(ILTD_CLI_VERSION 0.1.0)
 
-message("Building ILTDada Version ${PROJECT_VERSION}\n\n")
+if (NOT ILTD_DEFAULT_PORT)
+	set(ILTD_DEFAULT_PORT 16130)
+endif()
+
+message("Building ILTDada Version ${PROJECT_VERSION} with default port ${ILTD_DEFAULT_PORT}\n\n")
 
 set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -W -Wall -DALLOW_VERBOSE -g")
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -W -Wall -DALLOW_VERBOSE -g")
@@ -37,11 +41,39 @@ include(FetchContent)
 
 FetchContent_Declare(udpPacketManager
                      GIT_REPOSITORY https://github.com/David-McKenna/udpPacketManager.git
-                     GIT_TAG 3fad453e9f05f986579ba0e88dc1a0005115d67b
+                     GIT_TAG 6805b30791c91c51d59af62978bd4bf91fc7bd27
                      )
 
 FetchContent_MakeAvailable(udpPacketManager)
 include_directories(${udpPacketManager_SOURCE_DIR}/src/lib/)
+
+# Pull the PSRDADA components from UPM as well
+include(ExternalProject)
+ExternalProject_Get_Property(internal_PSRDADA install_dir)
+add_library(psrdada STATIC IMPORTED)
+set_property(TARGET psrdada PROPERTY IMPORTED_LOCATION ${install_dir}/src/internal_PSRDADA/src/.libs/libpsrdada.a)
+add_dependencies(psrdada internal_PSRDADA)
+include_directories(${install_dir}/src/internal_PSRDADA/src/)
+
+message("")
+
+# Find the OpenMP package on the system, as taken from udpPacketManager (should abstract these between the two of them)
+
+message("Configuring OpenMP...")
+find_package(OpenMP REQUIRED)
+find_library(IOMP_LIB iomp5 HINTS /opt/intel/oneapi/compiler/latest/linux/compiler/lib/)
+
+if(OpenMP_C_LIB_NAMES MATCHES ".*(iomp).*" OR IOMP_LIB)
+	message ("Intel OpenMP Detected.")
+	# Determine the optimal number of threads for this machine (when using Intel OpenMP Libraries)
+	execute_process(COMMAND bash -c "cat /proc/cpuinfo | uniq | grep -m 2 \"siblings\" | cut -d \":\" -f 2 | sort --numeric --unique | xargs echo"
+	                OUTPUT_VARIABLE OMP_THREADS
+	                )
+
+else()
+	message(WARNING "Other OpenMP implementation Detected (performance may be degraded, we highly recommend using the Intel OpenMP libraries)")
+	set(OMP_THREADS 8)
+endif()
 message("")
 
 
@@ -59,6 +91,8 @@ add_library(iltdada STATIC
 
 add_dependencies(iltdada lofudpman)
 
+
+
 # Include all of our headers
 target_include_directories(iltdada PUBLIC
 		${PROJECT_SOURCE_DIR}/src/lib
@@ -74,6 +108,15 @@ set_property(TARGET iltdada PROPERTY LINKER_LANGUAGE CXX)
 set_property(TARGET iltdada PROPERTY LINK_WHAT_YOU_USE ON)
 #set_property(TARGET iltdada PROPERTY INTERPROCEDURAL_OPTIMIZATION ON) # Static + IPO -> build failures?
 
+# Link OpenMP, as defined in udpPacketManager
+if(IOMP_LIB)
+	target_link_libraries(iltdada PUBLIC ${IOMP_LIB})
+endif()
+if(OpenMP_C_FOUND)
+	target_link_libraries(iltdada PUBLIC OpenMP::OpenMP_CXX OpenMP::OpenMP_C)
+else()
+	message(FATAL_ERROR "ERROR: OpenMP Not found.")
+endif()
 
 # Setup the CLIs
 add_executable(ilt_dada_cli src/recorder/ilt_dada_cli.c)
