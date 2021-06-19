@@ -20,11 +20,11 @@ installed prior to building the software
 	- libhdf5-dev, wget
 	- (Strongly Recommended) Clang or Intel C compiler
 
-On Debian-based systems, these can be installed with
+On Debian-based systems, these can be installed with apt, while recent CMake versions can be installed with Python's pip package manager.
 
 ```shell
 sudo apt install autoconf clang clang++ csh git libhdf5-dev libtool wget
-sudo python3 -m pip install cmake
+sudo python3 -m pip install --upgrade cmake
 ```
 
 ### Linux Kernel Requirements
@@ -55,6 +55,8 @@ total number of buffers below 4096, and the memory values below half of the tota
 dual CPU server with 128GB of RAM, it is not recommended to increase the value above 32GB, though you can if you want to have a longer ringbuffer history
 available).
 
+You can check your current limits by using the command `ipcs -m -l`.
+
 ```shell
 sudo bash -c "echo '4096' > /proc/sys/kernel/shmmni"
 sudo bash -c "echo '1099511627776' > /proc/sys/kernel/shmmax"
@@ -64,14 +66,16 @@ sudo bash -c "echo '1099511627776' > /proc/sys/kernel/shmall"
 or more permanently,
 
 ```shell
-sudo bash -c "echo 'kernel.shmni=4096' >> /etc/sysctl.conf"
+sudo bash -c "echo 'kernel.shmmni=4096' >> /etc/sysctl.conf"
 sudo bash -c "echo 'kernel.shmmax=1099511627776' >> /etc/sysctl.conf"
 sudo bash -c "echo 'kernel.shmall=1099511627776' >> /etc/sysctl.conf"
 sudo sysctl -p
 ```
 
-Setup
+Build and Install
 -----
+The CMake build system handles most of the complexity of building the software. Once the pre-requists are met, you can build and install the software using the following command block (also found in **build.sh**).
+
 ```shell
 mkdir build
 cd build
@@ -82,11 +86,11 @@ sudo cmake --install .
 
 Known Issues
 ------------
- - PSRDADA end-of-data marker does not appear to be propogated to readers, requires timeout code in UPM to workaround
+ - PSRDADA end-of-data marker does not appear to be propagated to readers, requires timeout code in UPM to workaround
 
 Usage
 -----
-- Import USAGE.md
+See **[README_CLI.md](docs/README_CLI.md)** for usage documentation.
 
 Funding
 -------

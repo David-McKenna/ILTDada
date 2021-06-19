@@ -1,5 +1,6 @@
 #pragma clang diagnostic push
 #pragma ide diagnostic ignored "openmp-use-default-none"
+
 #include "ilt_dada.h"
 #include <limits.h>
 
@@ -20,7 +21,6 @@ const ilt_dada_operate_params ilt_dada_operate_params_default = {
 
 // Configuration struct defaults
 const ilt_dada_config ilt_dada_config_default = {
-
 	// UDP configuration
 	.portNum = -1,
 	.portBufferSize = -1,
@@ -50,6 +50,7 @@ const ilt_dada_config ilt_dada_config_default = {
 	.sockfd = -1,
 	.headerText = "",
 
+	// Internal state and UPM structs for writing
 	.params = NULL,
 	.io = NULL,
 	.state = 0,
@@ -57,15 +58,45 @@ const ilt_dada_config ilt_dada_config_default = {
 
 
 // Sleep function wrapper
-void ilt_dada_sleep(double seconds) {
-	printf("Sleeping for %lf seconds.\n", seconds);
 
+/**
+ * @brief      Sleep for a given amount of time (in seconds)
+ *
+ * @param[in]  seconds  The seconds to sleep
+ * @param[in]  verbose  Enable / disable print message
+ */
+void ilt_dada_sleep(double seconds, int verbose) {
+	if (verbose) {
+		printf("Sleeping for %lf seconds.\n", seconds);
+	}
+
+	ilt_dada_sleep_multilog(seconds, NULL);
+}
+/**
+ * @brief      Sleep for a given amount of time (in seconds)
+ *
+ * @param[in]  seconds  The seconds to sleep
+ * @param      mlog     The multilog struct if you want to log to the ringbuffer
+ */
+void ilt_dada_sleep_multilog(double seconds, multilog_t* mlog) {
+	// If given, log the sleep to the ringbuffer multilog
+	if (mlog != NULL) {
+		#pragma omp task
+		multilog(mlog, 6, "Sleeping for %lf seconds.\n", seconds);
+	}
+
+	// Actually sleep for the given amount of time
 	struct timespec sleep = { (int) seconds, (int) (seconds - (int) seconds) * 1e9 };
 	nanosleep(&sleep, NULL);
 }
 
 
 // Allocate and initialise the configuration, operations and I/O structs
+/**
+ * @brief      Initialise a ilt_dada_config struct
+ *
+ * @return     ptr (success), NULL (failure)
+ */
 ilt_dada_config* ilt_dada_init() {
 
 
@@ -101,10 +132,9 @@ ilt_dada_config* ilt_dada_init() {
 }
 
 /**
- * @brief      Initialise a UDP network socket on the given port number and
- *             expand the kernel buffer to the required size (in bytes)
+ * @brief      Initialise a UDP network socket following the given configuration struct
  *
- * @param      config  The configuration struct
+ * @param      config  The ilt_dada_config configuration struct
  *
  * @return     0 (success) / -1 (failure) / -2 (unresolvable failure)
  */
@@ -118,7 +148,7 @@ int ilt_dada_initialise_port(ilt_dada_config *config) {
 
 		// Ensure we aren't trying to bind to a reserved port
 		// Kernel recommends using ports between 1024 and 49151
-		if (config->portNum < 1023 || config->portNum > 49152) {
+		if (config->portNum < MIN_PORT || config->portNum > MAX_PORT) {
 			fprintf(stderr, "ERROR: Requested a reserved port (%d). Exiting.\n", config->portNum);
 			return -2;
 		}
@@ -247,12 +277,10 @@ int ilt_dada_initialise_port(ilt_dada_config *config) {
 			return -1;
 		}
 
-		// Set a hard cap on the timeout for recieving data from the socket. We can't fully
+		// Set a hard cap on the timeout for receiving data from the socket. We can't fully
 		// 	trust recvmmsg here due to a known bug where the N_packs - 1 packet may block
-		// 	infinitely if it is never recieved
+		// 	infinitely if it is never received
 		// 	https://man7.org/linux/man-pages/man2/recvmmsg.2.html#bugs
-		// 	I wasn't able to confirm that this actually worked, and ran into other issues with timeouts
-		// 	so this is comments out for now.
 		const struct timeval timeout = { .tv_sec = (int) (config->portTimeout / 1), .tv_usec = (int) ((config->portTimeout - ((int) config->portTimeout)) *
 		                                                                                              1e6) };
 		if (setsockopt(sockfd_init, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) == -1) {
@@ -280,7 +308,9 @@ int ilt_dada_initialise_port(ilt_dada_config *config) {
 void cleanup_initialise_port(struct addrinfo *serverInfo, int sockfd_init) {
 	// getaddrinfo created a linked list; clean it up now that we no longer need
 	// it.
-	freeaddrinfo(serverInfo);
+	if (serverInfo != NULL) {
+		freeaddrinfo(serverInfo);
+	}
 
 	// Close the socket if it was successfully created
 	if (sockfd_init != -1) {
@@ -304,25 +334,144 @@ void cleanup_initialise_port(struct addrinfo *serverInfo, int sockfd_init) {
  * @brief      Sanity check parameters before they are used
  *
  * @param      config  The ilt_dada_config struct
+ * @param	   expectedState Combination of config_states the struct should be in
  *
  * @return     0 (success) / -1 (failure)
  */
-int ilt_dada_check_config(ilt_dada_config *config) {
-	// TODO
+int ilt_dada_check_config(ilt_dada_config *config, config_states expectedState) {
+	// int portNum;
+	if (config->portNum < MIN_PORT) {
+		fprintf(stderr, "ERROR: Port number is too low (given %d, limit %d).\n", config->portNum, MIN_PORT);
+		return -1;
+	} else if (config->portNum > MAX_PORT) {
+		fprintf(stderr, "ERROR: Port number is too high (given %d, limit %d).\n", config->portNum, MAX_PORT);
+		return -1;
+	}
+
+	// long portBufferSize;
+	if (config->portBufferSize < 1) {
+		fprintf(stderr, "ERROR: Memory buffer does not appear to be set (%ld).\n", config->portBufferSize);
+		return -1;
+	}
+
+	// int portPriority;
+	if (config->portPriority < 0) {
+		fprintf(stderr, "ERROR: Port priority is negative (%d).\n", config->portPriority);
+		return -1;
+	}
+
+	// int packetSize;
+	if (config->packetSize < UDPHDRLEN) {
+		fprintf(stderr, "ERROR: Packet size is too small to be useful (%d).\n", config->packetSize);
+		return -1;
+	} else if (config->packetSize > MAX_UDP_LEN) {
+		fprintf(stderr, "ERROR: Packet size is larger than maximum (%d vs %d).\n", config->packetSize, MAX_UDP_LEN);
+		return -1;
+	}
+
+	// float portTimeout;
+	if (config->portTimeout < 2) {
+		fprintf(stderr, "ERROR: Port timeout is too small (%f, must be greater than 2).\n", config->portTimeout);
+		return -1;
+	}
+
+	// int recvflags;
+	if (config->recvflags & MSG_PEEK) {
+		fprintf(stderr, "ERROR: Peeking is enabled for main packet reads (this will result in packets being read multiple times).\n");
+		return -1;
+	}
+
+	// ILTDada runtime options
+	// int forceStartup;
+	if (config->forceStartup < 0 || config->forceStartup > 1) {
+		fprintf(stderr, "ERROR: forceStartup is not in a boolean state (%d).", config->forceStartup);
+		return -1;
+	}
+
+	// int checkInitParameters;
+	// int checkInitData;
+	// check_parameter_types checkParameters;
+
+	// int writesPerStatusLog;
+	if (config->writesPerStatusLog < 0) {
+		fprintf(stderr, "ERROR: writesPerStatusLog is negative (%d).\n", config->writesPerStatusLog);
+		return -1;
+	}
+
+	// Observation configuration
+
+	// long startPacket;
+	// long endPacket;
+	if (config->state & NETWORK_READY) {
+		if (config->startPacket < LFREPOCH) {
+			fprintf(stderr, "ERROR: Start packet is before 2008 (uninitialised? %ld).", config->startPacket);
+			return -1;
+		}
+
+		if (config->endPacket < LFREPOCH) {
+			fprintf(stderr, "ERROR: End packet is before 2008 (uninitialised? %ld).", config->endPacket);
+			return -1;
+		}
+	}
+
+	// int packetsPerIteration;
+	if (config->packetsPerIteration < 1) {
+		fprintf(stderr, "ERROR: Requested less than 1 packet per read operation (%d).\n", config->packetsPerIteration);
+		return -1;
+	}
+
+
+
+	// unsigned char obsClockBit;
+	// Ringbuffer working variables
+	// int sockfd;
+	if (config->state & NETWORK_READY) {
+		if (config->obsClockBit > 2) {
+			fprintf(stderr, "ERROR: obsClockBit does not appear to be correctly set (%d)\n", config->obsClockBit);
+		}
+
+		if (config->sockfd < 0) {
+			fprintf(stderr, "ERROR: state indicates network is ready, but socket is not set.\n");
+			return -1;
+		}
+	}
+	// char headerText[DADA_DEFAULT_HEADER_SIZE];
+
+	// Main operation loop variables
+	// ilt_dada_operate_params *params;
+	if (config->params == NULL) {
+		fprintf(stderr, "ERROR: Parameters struct does not appear to be allocated.\n");
+		return -1;
+	}
+
+	// lofar_udp_io_write_config *io;
+	if (config->io == NULL) {
+		fprintf(stderr, "ERROR: I/O struct does not appear to be allocated.\n");
+		return -1;
+	}
+
+	// config_states state;
+	if (config->state != expectedState) {
+		fprintf(stderr, "ERROR: State does not match expectations, (NTWK_R: %d vs %d, NTWK_C: %d v %d, RBR_R: %d vs %d, CPL: %d vs %d).\n",
+		  expectedState & NETWORK_READY, config->state & NETWORK_READY, expectedState & NETWORK_CHECKED, config->state & NETWORK_CHECKED,
+		  expectedState & RINGBUFFER_READY, config->state & RINGBUFFER_READY, expectedState & COMPLETE, config->state & COMPLETE);
+		return -1;
+	}
 	return 0;
 }
 
 /**
  * @brief      Setup a ringbuffer from only ilt_dada_config
  *
- * @param      config  The ilt_dada configuration struct
+ * @param      config    The ilt_dada configuration struct
+ * @param[in]  setup_io  Choose to allocate the ringbuffer or not
  *
  * @return     0 (success) / -1 (failure)
  */
 int ilt_dada_setup(ilt_dada_config *config, int setup_io) {
 
 	// Sanity check the input
-	if (ilt_dada_check_config(config) < 0) {
+	if (ilt_dada_check_config(config, 0) < 0) {
 		return -1;
 	}
 
@@ -348,12 +497,14 @@ int ilt_dada_setup(ilt_dada_config *config, int setup_io) {
  *             receiving
  *
  * @param      config  The configuration struct
+ * @param[in]  flags   The recv flags
  *
- * @return     0 (success) / -1 (failure) / -2 (metadata mismatch) / -3 (all data is 0-valued)
+ * @return     0 (success) / -1 (failure) / -2 (metadata mismatch) / -3 (all
+ *             data is 0-valued)
  */
 int ilt_dada_check_network(ilt_dada_config *config, int flags) {
 
-	// Read the first packet in the queue into the buffer
+	// Read the first packet in the queue into the buffer (peek so it can be consumed later if we're late)
 	unsigned char buffer[MAX_UDP_LEN];
 	ssize_t recvreturn;
 	if ((recvreturn = recvfrom(config->sockfd, &buffer[0], MAX_UDP_LEN, MSG_PEEK | flags, NULL, NULL)) == -1) {
@@ -365,13 +516,14 @@ int ilt_dada_check_network(ilt_dada_config *config, int flags) {
 		return -1;
 	}
 
+	// Check the packet header state
 	int returnVal = 0;
 	if ((returnVal = ilt_dada_check_header(config, &buffer[0])) < 0) {
 		return returnVal;
 	}
 
 
-	// Check that the packet doesn't only contain 0-values
+	// Check that the packet doesn't only contain 0-values if requested
 	lofar_source_bytes *source = (lofar_source_bytes*) &(buffer[1]);
 	if (config->checkInitData) {
 		int checkData = 0;
@@ -393,11 +545,14 @@ int ilt_dada_check_network(ilt_dada_config *config, int flags) {
 		}
 	}
 
+	// Copy the clock bit into the struct
 	config->obsClockBit = source->clockBit;
-	// 16 + (61,122,244) * 16 * 4 / (0.5 1, 2)
+	printf("Packet clock bit state: %d\n", config->obsClockBit);
+	// 16 + (61, 122, 244) * 16 * 4 / (0.5, 1, 2)
 	// Max == 7824
+	// Calculate the packet size
 	config->packetSize = (int) (UDPHDRLEN + buffer[6] * buffer[7] * ((float) UDPNPOL / (source->bitMode ? source->bitMode : 0.5)));
-	printf("PACKET SIZE: %d\n", config->packetSize);
+	printf("Packet size: %d\n", config->packetSize);
 
 
 	// Offset by 1 to account for the fact we will read this packet again (since we used MSG_PEEK)
@@ -407,6 +562,14 @@ int ilt_dada_check_network(ilt_dada_config *config, int flags) {
 	return 0;
 }
 
+/**
+ * @brief      Sanity check the contents of the CEP packet header
+ *
+ * @param      config  The ilt_dada configuration struct
+ * @param      buffer  The buffer with the CEP header
+ *
+ * @return     0: success, -1: failure
+ */
 int ilt_dada_check_header(ilt_dada_config *config, unsigned char* buffer) {
 	// Sanity check the components of the CEP packet header
 	lofar_source_bytes *source = (lofar_source_bytes*) &(buffer[1]);
@@ -432,7 +595,7 @@ int ilt_dada_check_header(ilt_dada_config *config, unsigned char* buffer) {
 
 
 		// Check that the RSP sequence is constrained
-		// This does not account for the variability in RSPMAXSEQ between the 200MHz/160MHz clocks
+		// TODO: This does not account for the variability in RSPMAXSEQ between the 200MHz/160MHz clocks
 		if (*((unsigned int *) &(buffer[12])) > RSPMAXSEQ) {
 			fprintf(stderr, "ERROR: RSP Sequence on port %d appears malformed (sequence higher than 200MHz clock maximum, %d).\n", config->portNum, *((unsigned int *) &(buffer[12])));
 			return -1;
@@ -452,6 +615,7 @@ int ilt_dada_check_header(ilt_dada_config *config, unsigned char* buffer) {
 
 		// Check that the clock and bitmodes are the expected values
 		// No longer checked, using these as the source of the data
+		// Might re-do this section in the future (TODO?)
 		/*
 		if (source->clockBit != config->obsClockBit && config->obsClockBit != (unsigned char) -1) {
 			fprintf(stderr, "ERROR: RSP reports a different clock than expected on port %d (expected %d, got %d).", config->portNum, config->obsClockBit, source->clockBit);
@@ -473,6 +637,13 @@ int ilt_dada_check_header(ilt_dada_config *config, unsigned char* buffer) {
 	return 0;
 }
 
+/**
+ * @brief      Connect to and destroy a ringbuffer on the given key
+ *
+ * @param[in]  key   The ringbuffer key
+ *
+ * @return     0: success, -1: failure.
+ */
 int ilt_dada_connect_and_destroy_ringbuffer(int key) {
 	ipcio_t tmpIpc = IPCIO_INIT;
 	
@@ -489,14 +660,24 @@ int ilt_dada_connect_and_destroy_ringbuffer(int key) {
 	return 0;
 }
 
+/**
+ * @brief      Setup the ringbuffer with the configuration struct parameters
+ *
+ * @param      config  The ilt_dada configuration struct
+ *
+ * @return     0: success, -1: failure
+ */
 int ilt_dada_setup_ringbuffer(ilt_dada_config *config) {
+	// If the ringbuffer hasn't already been allocated,
 	if (!(config->state & RINGBUFFER_READY)) {
+		// Use the UPM writer API to setup the ringbuffer and header
 		if (lofar_udp_io_write_setup(config->io, 0) < 0) {
+			// If the process has failed but the forceStartup flag is set, destroy the existing ringbuffer and allocate our new one.
+			// TODO: I re-wrote the UPM API here, this block (and the connect_and_destroy func may no longer be needed, just set the right struct variables
 			if (config->forceStartup) {
 				fprintf(stderr, "ERROR: Failed to attach to given ringbuffer %d, attempting to destroy given keys and then will try to connect again.\n", config->io->outputDadaKeys[0]);
 
-				// Cleanup the state of the struct
-				// TODO: Sort out the UPM issue preventing me from using the cleanup function (writing to a broken state)
+				// Cleanup the state of the I/O struct
 				FREE_NOT_NULL(config->io->dadaWriter[0].ringbuffer);
 				FREE_NOT_NULL(config->io->dadaWriter[0].header);
 				lofar_udp_io_write_cleanup(config->io, 0, 1);
@@ -518,47 +699,62 @@ int ilt_dada_setup_ringbuffer(ilt_dada_config *config) {
 				return -1;
 			}
 		}
+		// Mark the process as successful
 		config->state |= RINGBUFFER_READY;
 	}
-
 
 	return 0;
 }
 
 
 
+/**
+ * @brief      The main setup + processing loop
+ *
+ * @param      config  The ilt_dada configuration struct
+ *
+ * @return     0: success, -1: failure
+ */
 int ilt_dada_operate(ilt_dada_config *config) {
 
+	// Ensure the network has been initialised
 	if (!(config->state & NETWORK_READY)) {
 		fprintf(stderr, "ERROR: Network has not yet been initialised. Exiting.\n");
 		return -1;
 	}
+
+	// Allocate the ringbuffer if it has not yet been allocated (lazy startup option).
 	if (!(config->state & RINGBUFFER_READY)) {
 		if (ilt_dada_setup_ringbuffer(config) < 0) {
 			return -1;
 		}
 	}
 
-	// Timeout apparently is relative to the socket being oepned, so it's useless.
+	// Timeout apparently is relative to the socket being opened, so there's no point in using it here.
+	// Leaving this in as I tried to implement it a second time while forgetting it didn't work.
 	//static struct timespec timeout;
 	//timeout.tv_sec = (int) config->portTimeout;
 	//timeout.tv_nsec = (int) ((config->portTimeout - ((int) config->portTimeout) ) * 1e9);
+
+	// Initialise a parameters struct for a new observation
 	static ilt_dada_operate_params params = { 	.msgvec = NULL, 
 												.iovecs = NULL, 
 												.timeout = NULL, 
 												.packetsSeen = 0,
+												.packetsLastSeen = 0,
 												.packetsExpected = 0,
+												.packetsLastExpected = 0,
 												.bytesWritten = 0
 											};
 	params.finalPacket = config->endPacket;
 	*(config->params) = params;
 
-	printf("Prepare\n");
+	VERBOSE(printf("Prepare\n"));
 	if (ilt_data_operate_prepare(config) < 0) {
 		return -1;
 	}
 
-	printf("Network\n");
+	VERBOSE(printf("Network\n"));
 	if (ilt_dada_check_network(config, 0) < 0) {
 		ilt_dada_operate_cleanup(config);
 		return -1;
@@ -570,14 +766,14 @@ int ilt_dada_operate(ilt_dada_config *config) {
 		// Update the current packet so that we reflect the missed data in the packet loss
 		config->currentPacket = config->startPacket;
 	} else {
-		// Sleep until we're 5 seconds from the desired start time
+		// Sleep until we're 2 second from the desired start time
 		int sleepTime = (config->startPacket - config->currentPacket) / (clock160MHzPacketRate * (1 - config->obsClockBit) + clock200MHzPacketRate * config->obsClockBit);
-		if (sleepTime > 5) {
-			ilt_dada_sleep(sleepTime);
+		if (sleepTime > 2) {
+			ilt_dada_sleep_multilog(sleepTime, config->io->dadaWriter[0].multilog);
 		}
 	}
 
-	printf("Loop\n");
+	VERBOSE(printf("Loop\n"));
 	// Read new data from the port until the observation ends
 	if (ilt_dada_operate_loop(config) < 0) {
 		ilt_dada_operate_cleanup(config);
@@ -606,7 +802,8 @@ int ilt_dada_operate(ilt_dada_config *config) {
 
 
 /**
- * @brief      The main loop of the recorder; receive packets and copy them to a PSRDADA ringbuffer
+ * @brief      The main loop of the recorder; receive packets and copy them to a
+ *             PSRDADA ringbuffer
  *
  * @param      config  The recording configuration
  *
@@ -622,7 +819,7 @@ int ilt_dada_operate_loop(ilt_dada_config *config) {
 	// If we're starting early or the buffer started filling early, consume data until we reach the starting packet
 	if (config->currentPacket > config->startPacket) {
 		// Past the start up time, begin the main loop immediately.
-		printf("Late start-up resulted in %d packets to be missed, starting now.\n");
+		printf("Late start-up resulted in %ld packets to be missed, starting now.\n", config->currentPacket - config->startPacket);
 
 		// TODO: Make a decision, should thse be included in the stats or not?
 		//config->startPacket = config->currentPacket;
@@ -752,7 +949,8 @@ int ilt_dada_operate_loop(ilt_dada_config *config) {
 }
 
 /**
- * @brief      Setup the memory and structures needed to receive packets via recvmmsg
+ * @brief      Setup the memory and structures needed to receive packets via
+ *             recvmmsg
  *
  * @param      config  The recording configuration
  *
@@ -822,6 +1020,15 @@ void ilt_dada_operate_cleanup(ilt_dada_config *config) {
 /**
  * @brief      Log information on packet loss, total observed packets
  *
+ * @param      mlog                 The mlog
+ * @param[in]  portNum              The port number
+ * @param[in]  currentPacket        The current packet
+ * @param[in]  startPacket          The start packet
+ * @param[in]  endPacket            The end packet
+ * @param[in]  packetsLastExpected  The packets last expected
+ * @param[in]  packetsLastSeen      The packets last seen
+ * @param[in]  packetsExpected      The packets expected
+ * @param[in]  packetsSeen          The packets seen
  * @param      config  The recording configuration
  */
 void ilt_dada_packet_comments(multilog_t *mlog, int portNum, long currentPacket, long startPacket, long endPacket, long packetsLastExpected, long packetsLastSeen, long packetsExpected, long packetsSeen) {
@@ -862,4 +1069,5 @@ void ilt_dada_cleanup(ilt_dada_config *config) {
 	FREE_NOT_NULL(config);
 }
 
+// Remove diagnostic ignored "openmp-use-default-none"
 #pragma clang diagnostic pop

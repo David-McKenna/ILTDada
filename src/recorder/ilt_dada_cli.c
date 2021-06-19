@@ -8,21 +8,23 @@ void helpMessgaes() {
 
 	printf("-h      :   Display this message\n\n");
 
-	printf("-p (int):	UDP port to monitor (default: %d)\n", DEF_PORT);
-	printf("-k (int):	Output PSRDADA Ringbuffer key (default: %d)\n\n", DEF_PORT);
+	printf("-p (int):   UDP port to monitor (default: %d)\n", DEF_PORT);
+	printf("-k (int):   Output PSRDADA Ringbuffer key (default: %d)\n\n", DEF_PORT);
 
 	printf("-n (int):   Number of packets per network operation (default: 256)\n");
 	printf("-m (int):   Number of packets blocks per segment of the ringbuffer (default: 64)\n");
-	printf("-s (float): Target ringbuffer length in seconds (determines number of segments in the ringbuffer, default: 5.0)\n\n");
+	printf("-s (float): Target ringbuffer length in seconds (determines number of segments in the ringbuffer, default: 5.0)\n");
+	printf("-l (int):   Number of packet writes per network status writes (default: 256)\n");
+	printf("-z (float): Network timeout length in seconds (must be greater than 2, default: 30)\n");
 
 	printf("-r (int):   Number of read clients (default: 1)\n");
 	printf("-e (int):   Allocate the ringbuffer immediately for a given packet size (default: false, recommended: 7824)\n");
 	printf("-f      :   Force allocate the ringbuffer (remove existing ringbuffer on given key) (default: false)\n\n");
 
 	printf("-S (str):   ISOT Start Time (YYYY-MM-DDTHH:MM:SS, default '')\n");
-	printf("-T (str):	ISOT End time (YYYY-MM-DDTHH:MM:SS, default '')\n");
-	printf("-t (float):	Observation length in seconds (default: 60s)\n");
-	printf("-w (float): Time buffer between accepting packets and starting recording (process will sleep until N seconds before observation, default: 10s)\n");
+	printf("-T (str):   ISOT End time (YYYY-MM-DDTHH:MM:SS, default '')\n");
+	printf("-t (float): Observation length in seconds (default: 60s)\n");
+	printf("-w (float): Time buffer between accepting packets and starting recording (process will not perform any actions until N seconds before observation, default: 10s)\n");
 
 
 	/* Undocumented / debug only
@@ -31,7 +33,21 @@ void helpMessgaes() {
 	 */
 }
 
+int checkOpt(char opt, char* inp, char* endPtr) {
+	if (inp != endPtr && *(endPtr) == '\0') {
+		return 0;
+	}
+
+	fprintf(stderr, "ERROR: Failed to parse flag %c with value %s, exiting.\n", opt, inp);
+	return 1;
+}
+
 int main(int argc, char  *argv[]) {
+
+	if (argc == 1) {
+		helpMessgaes();
+		return 1;
+	}
 
 	ilt_dada_config *cfg = ilt_dada_init();
 	
@@ -50,37 +66,61 @@ int main(int argc, char  *argv[]) {
 	float targetSeconds = 5.0f, obsSeconds = 10.0f;
 	char startTime[DEF_STR_LEN] = "", endTime[DEF_STR_LEN] = "";
 
-	while ((inputOpt = getopt(argc, argv, "p:k:n:m:s:r:e:fS:T:t:C")) != -1) {
+	char *endPtr = NULL, flagged = 0;
+
+	while ((inputOpt = getopt(argc, argv, "hp:k:n:m:s:r:l:z:e:fS:T:t:C")) != -1) {
 		switch (inputOpt) {
 
+			case 'h':
+				helpMessgaes();
+				flagged = 1;
+				break;
+
 			case 'p':
-				cfg->portNum = atoi(optarg);
+				cfg->portNum = strtod(optarg, &endPtr);
+				if (checkOpt(inputOpt, optarg, endPtr)) { flagged = 1; }
 				break;
 
 			case 'k':
-				cfg->io->outputDadaKeys[0] = atoi(optarg);
+				cfg->io->outputDadaKeys[0] = strtod(optarg, &endPtr);
+				if (checkOpt(inputOpt, optarg, endPtr)) { flagged = 1; }
 				break;
 
 			case 'n':
-				cfg->packetsPerIteration = atoi(optarg);
+				cfg->packetsPerIteration = strtod(optarg, &endPtr);
+				if (checkOpt(inputOpt, optarg, endPtr)) { flagged = 1; }
 				cfg->portBufferSize = 8 * cfg->packetsPerIteration * MAX_UDP_LEN;
 				break;
 
 			case 'm':
-				bufferMul = atoi(optarg);
+				bufferMul = strtod(optarg, &endPtr);
+				if (checkOpt(inputOpt, optarg, endPtr)) { flagged = 1; }
 				break;
 
 			case 's':
-				targetSeconds = atof(optarg);
+				targetSeconds = strtof(optarg, &endPtr);
+				if (checkOpt(inputOpt, optarg, endPtr)) { flagged = 1; }
 				break;
 
 			case 'r':
-				cfg->io->dadaConfig.num_readers = atoi(optarg);
+				cfg->io->dadaConfig.num_readers = strtod(optarg, &endPtr);
+				if (checkOpt(inputOpt, optarg, endPtr)) { flagged = 1; }
+				break;
+
+			case 'l':
+				cfg->writesPerStatusLog = strtod(optarg, &endPtr);
+				if (checkOpt(inputOpt, optarg, endPtr)) { flagged = 1; }
+				break;
+
+			case 'z':
+				cfg->portTimeout = strtof(optarg, &endPtr);
+				if (checkOpt(inputOpt, optarg, endPtr)) { flagged = 1; }
 				break;
 
 			case 'e':
+				cfg->packetSize = strtod(optarg, &endPtr);
+				if (checkOpt(inputOpt, optarg, endPtr)) { flagged = 1; }
 				cfg->forceStartup = 1;
-				cfg->packetSize = atoi(optarg);
 				packetSizeCopy = cfg->packetSize;
 				break;
 
@@ -97,12 +137,14 @@ int main(int argc, char  *argv[]) {
 				break;
 
 			case 't':
-				obsSeconds = atof(optarg);
+				obsSeconds = strtof(optarg, &endPtr);
+				if (checkOpt(inputOpt, optarg, endPtr)) { flagged = 1; }
 				break;
 
 
 			case 'w':
-				minStartup = atoi(optarg);
+				minStartup = strtod(optarg, &endPtr);
+				if (checkOpt('w', optarg, endPtr)) { flagged = 1; }
 				break;
 
 			case 'C':
@@ -114,6 +156,11 @@ int main(int argc, char  *argv[]) {
 				ilt_dada_cleanup(cfg);
 				return 1;
 		}
+	}
+
+	if (flagged) {
+		ilt_dada_cleanup(cfg);
+		return 1;
 	}
 
 
@@ -147,10 +194,11 @@ int main(int argc, char  *argv[]) {
 
 	// TODO: Rework / add clock bit flag so we can test this before we enter a sleep state
 	// Convert the start time to a packet
-	cfg->startPacket = lofar_udp_time_get_packet_from_isot(startTime, cfg->obsClockBit);
+	// Fallback to 200MHz clock if bit is not set.
+	cfg->startPacket = lofar_udp_time_get_packet_from_isot(startTime, cfg->obsClockBit > 2 ? 0 : cfg->obsClockBit);
 
 	if (strcmp(endTime, "") != 0) {
-		cfg->endPacket = lofar_udp_time_get_packet_from_isot(endTime, cfg->obsClockBit);
+		cfg->endPacket = lofar_udp_time_get_packet_from_isot(endTime, cfg->obsClockBit > 2 ? 0 : cfg->obsClockBit);
 
 	}
 
@@ -174,6 +222,13 @@ int main(int argc, char  *argv[]) {
 	ilt_dada_cleanup(cfg);
 }
 
+/**
+ * @brief      { function_description }
+ *
+ * @param      inputStr  The input string
+ *
+ * @return     { description_of_the_return_value }
+ */
 time_t unixTimeFromString(char *inputStr) {
 	struct tm tmTime;
 	
@@ -184,6 +239,17 @@ time_t unixTimeFromString(char *inputStr) {
 	return mktime(&tmTime);
 }
 
+/**
+ * @brief      { function_description }
+ *
+ * @param      startTime        The start time
+ * @param      endTime          The end time
+ * @param[in]  obsSeconds       The obs seconds
+ * @param[in]  ignoreTimeCheck  The ignore time check
+ * @param[in]  minStartup       The minimum startup
+ *
+ * @return     { description_of_the_return_value }
+ */
 int ilt_dada_cli_check_times(char *startTime, char *endTime, double obsSeconds, int ignoreTimeCheck, int minStartup) {
 	time_t currTime, startUnixTime, endUnixTime;
 	time(&currTime);
@@ -231,7 +297,7 @@ int ilt_dada_cli_check_times(char *startTime, char *endTime, double obsSeconds, 
 
 	if ((startUnixTime - currTime) > minStartup) {
 		printf("Observation starts in %ld seconds, sleeping until %d seconds before the start time.\n", (startUnixTime - currTime), minStartup);
-		ilt_dada_sleep(startUnixTime - currTime);
+		ilt_dada_sleep(startUnixTime - currTime, 1);
 	}
 
 	return 0;
