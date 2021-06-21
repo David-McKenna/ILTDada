@@ -14,8 +14,8 @@ endif()
 
 # Describe the project
 project(ilt_dada 	VERSION 0.1.0
-							DESCRIPTION "PSRDADA based recorder for international LOFAR stations."
-							LANGUAGES C CXX
+					DESCRIPTION "PSRDADA based recorder for international LOFAR stations."
+					LANGUAGES C CXX
 )
 
 set(ILTD_CLI_VERSION 0.1.0)
@@ -41,7 +41,7 @@ include(FetchContent)
 
 FetchContent_Declare(udpPacketManager
                      GIT_REPOSITORY https://github.com/David-McKenna/udpPacketManager.git
-                     GIT_TAG 634faabecd1ab67ee154c3ba18d40153ab25220f
+                     GIT_TAG cdbccea67cd70741722aa46bdc3a711aacb67708
                      )
 
 FetchContent_MakeAvailable(udpPacketManager)

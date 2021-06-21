@@ -33,15 +33,6 @@ void helpMessgaes() {
 	 */
 }
 
-int checkOpt(char opt, char* inp, char* endPtr) {
-	if (inp != endPtr && *(endPtr) == '\0') {
-		return 0;
-	}
-
-	fprintf(stderr, "ERROR: Failed to parse flag %c with value %s, exiting.\n", opt, inp);
-	return 1;
-}
-
 int main(int argc, char  *argv[]) {
 
 	if (argc == 1) {
@@ -77,23 +68,23 @@ int main(int argc, char  *argv[]) {
 				break;
 
 			case 'p':
-				cfg->portNum = strtod(optarg, &endPtr);
+				cfg->portNum = strtoi(optarg, &endPtr);
 				if (checkOpt(inputOpt, optarg, endPtr)) { flagged = 1; }
 				break;
 
 			case 'k':
-				cfg->io->outputDadaKeys[0] = strtod(optarg, &endPtr);
+				cfg->io->outputDadaKeys[0] = strtoi(optarg, &endPtr);
 				if (checkOpt(inputOpt, optarg, endPtr)) { flagged = 1; }
 				break;
 
 			case 'n':
-				cfg->packetsPerIteration = strtod(optarg, &endPtr);
+				cfg->packetsPerIteration = strtoi(optarg, &endPtr);
 				if (checkOpt(inputOpt, optarg, endPtr)) { flagged = 1; }
 				cfg->portBufferSize = 8 * cfg->packetsPerIteration * MAX_UDP_LEN;
 				break;
 
 			case 'm':
-				bufferMul = strtod(optarg, &endPtr);
+				bufferMul = strtoi(optarg, &endPtr);
 				if (checkOpt(inputOpt, optarg, endPtr)) { flagged = 1; }
 				break;
 
@@ -103,12 +94,12 @@ int main(int argc, char  *argv[]) {
 				break;
 
 			case 'r':
-				cfg->io->dadaConfig.num_readers = strtod(optarg, &endPtr);
+				cfg->io->dadaConfig.num_readers = strtoi(optarg, &endPtr);
 				if (checkOpt(inputOpt, optarg, endPtr)) { flagged = 1; }
 				break;
 
 			case 'l':
-				cfg->writesPerStatusLog = strtod(optarg, &endPtr);
+				cfg->writesPerStatusLog = strtoi(optarg, &endPtr);
 				if (checkOpt(inputOpt, optarg, endPtr)) { flagged = 1; }
 				break;
 
@@ -118,7 +109,7 @@ int main(int argc, char  *argv[]) {
 				break;
 
 			case 'e':
-				cfg->packetSize = strtod(optarg, &endPtr);
+				cfg->packetSize = strtoi(optarg, &endPtr);
 				if (checkOpt(inputOpt, optarg, endPtr)) { flagged = 1; }
 				cfg->forceStartup = 1;
 				packetSizeCopy = cfg->packetSize;
@@ -143,8 +134,12 @@ int main(int argc, char  *argv[]) {
 
 
 			case 'w':
-				minStartup = strtod(optarg, &endPtr);
+				minStartup = strtoi(optarg, &endPtr);
 				if (checkOpt('w', optarg, endPtr)) { flagged = 1; }
+				if (minStartup < 2) {
+					fprintf(stderr, "ERROR: Minimum start-up time must be greater than 2 seconds (%s/%d provided), exiting.\n", optarg, minStartup);
+					return 1;
+				}
 				break;
 
 			case 'C':
@@ -165,15 +160,17 @@ int main(int argc, char  *argv[]) {
 
 
 
+
 	cfg->io->writeBufSize[0] = bufferMul * cfg->packetsPerIteration * cfg->packetSize;
 
-	// TODO: float packetRate = ();	
-	if (((float) bufferMul * cfg->packetsPerIteration) / (float) 12207 > targetSeconds) {
-		fprintf(stderr, "ERROR: Requested time is less than the size of a single buffer (%f vs %f); increase -s or decrease -m, exiting.\n", ((float) bufferMul * cfg->packetsPerIteration) / (float) 12207, targetSeconds);
+	// TODO: float packetRate = ();
+	float packetRate = 12207.0f;
+	if (((float) bufferMul * cfg->packetsPerIteration) / packetRate > targetSeconds) {
+		fprintf(stderr, "ERROR: Requested time is less than the size of a single buffer (%f vs %f); increase -s or decrease -m, exiting.\n", ((float) bufferMul * cfg->packetsPerIteration) / packetRate, targetSeconds);
 		ilt_dada_cleanup(cfg);
 		return 1;
 	}
-	cfg->io->dadaConfig.nbufs = targetSeconds * 12207 / cfg->packetsPerIteration / bufferMul;
+	cfg->io->dadaConfig.nbufs = targetSeconds * packetRate / cfg->packetsPerIteration / bufferMul;
 
 
 	if (ilt_dada_cli_check_times(startTime, endTime, obsSeconds, ignoreTimeCheck, minStartup) < 0) {
