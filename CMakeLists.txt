@@ -48,7 +48,6 @@ FetchContent_MakeAvailable(udpPacketManager)
 
 message("")
 
-# Find the OpenMP package on the system, as taken from udpPacketManager (should abstract these between the two of them)
 
 message("Configuring OpenMP...")
 find_package(OpenMP REQUIRED)
