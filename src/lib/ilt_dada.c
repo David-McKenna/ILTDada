@@ -79,6 +79,12 @@ void ilt_dada_sleep(double seconds, int verbose) {
  * @param      mlog     The multilog struct if you want to log to the ringbuffer
  */
 void ilt_dada_sleep_multilog(double seconds, multilog_t* mlog) {
+	// Ensure we have a valid input
+	if (seconds <= 0) {
+		fprintf(stderr, "ERROR: Negative/Zero time (%lf) passed to %s, continuing.\n", seconds, __func__);
+		return;
+	}
+
 	// If given, log the sleep to the ringbuffer multilog
 	if (mlog != NULL) {
 		#pragma omp task
@@ -86,7 +92,7 @@ void ilt_dada_sleep_multilog(double seconds, multilog_t* mlog) {
 	}
 
 	// Actually sleep for the given amount of time
-	struct timespec sleep = { (int) seconds, (int) (seconds - (int) seconds) * 1e9 };
+	struct timespec sleep = { (time_t) seconds, (long) (seconds - (long) seconds) * 1e9 };
 	nanosleep(&sleep, NULL);
 }
 
@@ -98,7 +104,6 @@ void ilt_dada_sleep_multilog(double seconds, multilog_t* mlog) {
  * @return     ptr (success), NULL (failure)
  */
 ilt_dada_config* ilt_dada_init() {
-
 
 	// Allocate and null-check the main struct
 	ilt_dada_config *config = calloc(1, sizeof(ilt_dada_config));
@@ -163,7 +168,10 @@ int ilt_dada_initialise_port(ilt_dada_config *config) {
 
 		// Convert the port to a string for getaddrinfo
 		char portNumStr[16];
-		sprintf(portNumStr, "%d", config->portNum);
+		if (snprintf(portNumStr, 15, "%d", config->portNum) < 0) {
+			fprintf(stderr, "ERROR: Failed to print port number (%d) to string in %s, exiting.\n", config->portNum, __func__);
+			return -2;
+		}
 
 		// Struct to collect the results from getaddrinfo
 		struct addrinfo *serverInfo;
@@ -193,7 +201,7 @@ int ilt_dada_initialise_port(ilt_dada_config *config) {
 			}
 		}
 
-		// We have successfully build and bound to a socket, let's tweak some of
+		// We have successfully built and bound to a socket, let's tweak some of
 		// it's parameters
 
 
@@ -281,7 +289,7 @@ int ilt_dada_initialise_port(ilt_dada_config *config) {
 		// 	trust recvmmsg here due to a known bug where the N_packs - 1 packet may block
 		// 	infinitely if it is never received
 		// 	https://man7.org/linux/man-pages/man2/recvmmsg.2.html#bugs
-		const struct timeval timeout = { .tv_sec = (int) (config->portTimeout / 1), .tv_usec = (int) ((config->portTimeout - ((int) config->portTimeout)) *
+		const struct timeval timeout = { .tv_sec = (time_t) config->portTimeout, .tv_usec = (suseconds_t) ((config->portTimeout - ((long) config->portTimeout)) *
 		                                                                                              1e6) };
 		if (setsockopt(sockfd_init, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) == -1) {
 			fprintf(stderr, "ERROR: Failed to set timeout on port %d (errno%d: %s).\n", config->portNum, errno, strerror(errno));
@@ -423,6 +431,8 @@ int ilt_dada_check_config(ilt_dada_config *config, config_states expectedState) 
 
 
 	// unsigned char obsClockBit;
+
+
 	// Ringbuffer working variables
 	// int sockfd;
 	if (config->state & NETWORK_READY) {
@@ -435,6 +445,8 @@ int ilt_dada_check_config(ilt_dada_config *config, config_states expectedState) 
 			return -1;
 		}
 	}
+
+
 	// char headerText[DADA_DEFAULT_HEADER_SIZE];
 
 	// Main operation loop variables

@@ -3,11 +3,32 @@
 #include "lofar_udp_io.h"
 
 
-void CLICleanup() {
+void CLICleanup(int numPorts, lofar_udp_io_read_config *rdrConfig, lofar_udp_io_write_config *wrtConfig, lofar_udp_config *config, lofar_udp_input_meta *meta, char **rawData) {
+
+	for (int port = 0; port < numPorts; port++) {
+		if (rawData != NULL) {
+			FREE_NOT_NULL(rawData[port]);
+		}
+
+		lofar_udp_io_read_cleanup(rdrConfig, port);
+		lofar_udp_io_write_cleanup(wrtConfig, port, 1);
+
+	}
+
+	FREE_NOT_NULL(config);
+	FREE_NOT_NULL(meta);
 
 }
 
 void helpMessages() {
+	printf("ILTDada dada2disk (CLI v%s, lib %s)\n\n", ILTD_CLI_VERSION, ILTD_VERSION);
+
+	printf("-h              : Display this message\n");
+	printf("-i (str),(str)  : Input ringbuffer base number, and offset for further ringbuffers (example: %d,%d)\n", DEF_PORT, 10);
+	printf("-o (str)        : Output format string (example: output_[[outp]])\n");
+	printf("-n (int)        : Number of ringbuffers to consume data from (default: 1)\n");
+	printf("-m (int)        : Number of packets to consume per operation (default: 4096)\n");
+	printf("-f              : Forcibly rejoin and re-align ringbuffer if needed (default: False)\n");
 
 }
 
@@ -19,6 +40,7 @@ int main(int argc, char  *argv[]) {
 	lofar_udp_input_meta *meta = calloc(1, sizeof(lofar_udp_input_meta));
 	(*meta) = lofar_udp_input_meta_default;
 	meta->packetsPerIteration = 4096;
+	meta->numPorts = 1;
 
 	lofar_udp_io_read_config *rdrConfig = calloc(1, sizeof(lofar_udp_io_read_config));
 	(*rdrConfig) = lofar_udp_io_read_config_default;
@@ -26,18 +48,27 @@ int main(int argc, char  *argv[]) {
 	lofar_udp_io_write_config *wrtConfig = calloc(1, sizeof(lofar_udp_io_write_config));
 	(*wrtConfig) = lofar_udp_io_write_config_default;
 
-	char tmpHeaders[MAX_NUM_PORTS][UDPHDRLEN] = { { 0 } };
-	char *rawData[MAX_NUM_PORTS] = { NULL };
-	char inputOpt;
+	char tmpHeaders[MAX_NUM_PORTS][UDPHDRLEN];
+	char *rawData[MAX_NUM_PORTS];
+	long charsPerRead[MAX_NUM_PORTS];
 
+
+
+	for (int port = 0; port < MAX_NUM_PORTS; port++)
+		ARR_INIT(tmpHeaders[port], UDPHDRLEN, 0);
+
+	ARR_INIT(rawData, MAX_NUM_PORTS, NULL);
+	ARR_INIT(charsPerRead, MAX_NUM_PORTS, 0);
+
+	char inputOpt;
 	int inputProvided = 0, outputProvided = 0, ringbufferOffset = 10, parsed;
-	long charsPerRead[MAX_NUM_PORTS] = { 0 };
-	while((inputOpt = getopt(argc, argv, "i:o:n:m:f")) != -1) {
+	while((inputOpt = getopt(argc, argv, "i:o:n:m:fh")) != -1) {
 		switch (inputOpt) {
 			case 'i':
 				parsed = sscanf(optarg, "%d,%d", &(config->dadaKeys[0]), &ringbufferOffset);
 				if (parsed < 1) {
 					fprintf(stderr, "ERROR: Failed to parse input ringbuffer / offset (sscanf returned %d), exiting.\n", parsed);
+					CLICleanup(meta->numPorts, rdrConfig, wrtConfig, config, meta, NULL);
 					return 1;
 				}
 				inputProvided = 1;
@@ -45,7 +76,8 @@ int main(int argc, char  *argv[]) {
 
 			case 'o':
 				if (lofar_udp_io_write_parse_optarg(wrtConfig, optarg) < 0) {
-					helpMessages();
+					fprintf(stderr, "ERROR: Failed to parse output format %s, exiting.\n", optarg);
+					CLICleanup(meta->numPorts, rdrConfig, wrtConfig, config, meta, NULL);
 					return 1;
 				}
 				outputProvided = 1;
@@ -63,19 +95,27 @@ int main(int argc, char  *argv[]) {
 				wrtConfig->progressWithExisting = 1;
 				break;
 
+			case 'h':
+				helpMessages();
+				CLICleanup(meta->numPorts, rdrConfig, wrtConfig, config, meta, NULL);
+				return 1;
 
+			default:
+				fprintf(stderr, "ERROR: Unknown flag %c, exiting.\n", inputOpt);
+				CLICleanup(meta->numPorts, rdrConfig, wrtConfig, config, meta, NULL);
+				return 1;
 		}
 	}
 
 	if (!inputProvided) {
 		fprintf(stderr, "ERROR: No input provided, exiting.\n");
-		CLICleanup();
+		CLICleanup(meta->numPorts, rdrConfig, wrtConfig, config, meta, NULL);
 		return 1;
 	}
 
 	if (!outputProvided) {
 		fprintf(stderr, "ERROR: No output provided, exiting.\n");
-		CLICleanup();
+		CLICleanup(meta->numPorts, rdrConfig, wrtConfig, config, meta, NULL);
 		return 1;
 	}
 
@@ -89,7 +129,7 @@ int main(int argc, char  *argv[]) {
 	for (int port = 0; port < meta->numPorts; port++) {
 		config->dadaKeys[port] = config->dadaKeys[0] + port * ringbufferOffset;
 		if (lofar_udp_io_read_temp_DADA(tmpHeaders[port], sizeof(char), UDPHDRLEN, config->dadaKeys[port], 1) < UDPHDRLEN) {
-			CLICleanup();
+			CLICleanup(meta->numPorts, rdrConfig, wrtConfig, config, meta, NULL);
 			return 1;
 		}
 	}
@@ -97,7 +137,7 @@ int main(int argc, char  *argv[]) {
 	// Extract metadata from the headers
 	int emtpyBeamlets[2] = { 0 };
 	if (lofar_udp_parse_headers(meta, tmpHeaders, emtpyBeamlets) < 0) {
-		CLICleanup();
+		CLICleanup(meta->numPorts, rdrConfig, wrtConfig, config, meta, NULL);
 		return 1;
 	}
 
@@ -106,7 +146,7 @@ int main(int argc, char  *argv[]) {
 		charsPerRead[port] = meta->packetsPerIteration * meta->portPacketLength[port] * (long) sizeof(char);
 		if (rawData[port] == NULL) {
 			fprintf(stderr, "ERROR: Failed to allocate %ld bytes for buffer %d, exiting.\n", meta->packetsPerIteration * meta->portPacketLength[port] * sizeof(char), port);
-			CLICleanup();
+			CLICleanup(meta->numPorts, rdrConfig, wrtConfig, config, meta, rawData);
 			return 1;
 		}
 	}
@@ -115,7 +155,7 @@ int main(int argc, char  *argv[]) {
 	rdrConfig->readerType = DADA_ACTIVE;
 	for (int port = 0; port < meta->numPorts; port++) {
 		if (lofar_udp_io_read_setup_helper(rdrConfig, config, meta, port) < 0) {
-			CLICleanup();
+			CLICleanup(meta->numPorts, rdrConfig, wrtConfig, config, meta, rawData);
 			return 1;
 		}
 	}
@@ -123,7 +163,7 @@ int main(int argc, char  *argv[]) {
 	// Setup the writers
 	for (int outp = 0; outp < meta->numPorts; outp++) {
 		if (lofar_udp_io_write_setup_helper(wrtConfig, meta, 0) < 0) {
-			CLICleanup();
+			CLICleanup(meta->numPorts, rdrConfig, wrtConfig, config, meta, rawData);
 			return 1;
 		}
 	}
@@ -154,12 +194,7 @@ int main(int argc, char  *argv[]) {
 
 	}
 
-
-	for (int port = 0; port < meta->numPorts; port++ ) {
-		lofar_udp_io_read_cleanup(rdrConfig, port);
-		lofar_udp_io_write_cleanup(wrtConfig, port, 1); 
-	}
-	CLICleanup();
+	CLICleanup(meta->numPorts, rdrConfig, wrtConfig, config, meta, rawData);
 	return 0;
 
 }

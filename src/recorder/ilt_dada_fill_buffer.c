@@ -16,12 +16,11 @@
 #include "ilt_dada.h"
 
 #define PACKET_SIZE (UDPHDRLEN + UDPNPOL * UDPNTIMESLICE * 122)
-#define HOSTLEN 2048
 
 int main(int argc, char *argv[]) {
 
 	int inputOpt, packets = 0, waitTime = 1;
-	char inputFile[2048] = "", workingName[2048] = "", hostIP[HOSTLEN] = "127.0.0.1";
+	char inputFile[DEF_STR_LEN] = "", workingName[DEF_STR_LEN] = "", hostIP[DEF_STR_LEN] = "127.0.0.1";
 	long totalPackets = LONG_MAX, packetCount = 0, writtenBytes, readBytes;
 	int numPorts = 1;
 	int offset = 10, fullReads = 1, portOffset = 1;
@@ -32,9 +31,9 @@ int main(int argc, char *argv[]) {
 	config[0] = ilt_dada_init();
 
 
-	config[0]->portNum = 16130;
+	config[0]->portNum = DEF_PORT;
 	config[0]->packetsPerIteration = 1024;
-	config[0]->io->outputDadaKeys[0] = 16130;
+	config[0]->io->outputDadaKeys[0] = DEF_PORT;
 	config[0]->recvflags = -1;
 
 	while((inputOpt = getopt(argc, argv, "u:H:i:p:n:k:t:w:")) != -1) {

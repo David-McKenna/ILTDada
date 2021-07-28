@@ -1,8 +1,5 @@
 #include "ilt_dada_cli.h"
 
-time_t unixTimeFromString(char *inputStr);
-int ilt_dada_cli_check_times(char *startTime, char *endTime, double obsSeconds, int ignoreTimeCheck, int minStartup);
-
 void helpMessgaes() {
 	printf("ILTDada CLI (CLI v%s, lib %s)\n\n", ILTD_CLI_VERSION, ILTD_VERSION);
 
@@ -205,7 +202,7 @@ int main(int argc, char  *argv[]) {
 	}
 
 	printf("Preparing ILTDada to record data from port %d, consuming %d packets per iteration.\n", cfg->portNum, cfg->packetsPerIteration);
-	printf("Ring buffer on key %d (ptr %x) will require %ld MB (%ld GB) of memory to hold ~%ld seconds of data in %" PRIu64 " buffers.\n", cfg->io->outputDadaKeys[0], cfg->io->outputDadaKeys[0], cfg->io->writeBufSize[0] * cfg->io->dadaConfig.nbufs >> 20, cfg->io->writeBufSize[0] * cfg->io->dadaConfig.nbufs >> 30, cfg->packetsPerIteration * cfg->io->dadaConfig.nbufs / 12207, cfg->io->dadaConfig.nbufs);
+	printf("Ringbuffer on key %d (ptr %x) will require %ld MB (%ld GB) of memory to hold ~%ld seconds of data in %" PRIu64 " buffers.\n", cfg->io->outputDadaKeys[0], cfg->io->outputDadaKeys[0], cfg->io->writeBufSize[0] * cfg->io->dadaConfig.nbufs >> 20, cfg->io->writeBufSize[0] * cfg->io->dadaConfig.nbufs >> 30, cfg->packetsPerIteration * cfg->io->dadaConfig.nbufs / 12207, cfg->io->dadaConfig.nbufs);
 	printf("Start/End packets will be %ld and %ld.\n\n", cfg->startPacket, cfg->endPacket);
 
 	printf("Preparing to start recording...\n");
