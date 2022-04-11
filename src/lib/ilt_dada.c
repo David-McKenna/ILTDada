@@ -864,7 +864,7 @@ int ilt_dada_operate_loop(ilt_dada_config *config) {
 			config->currentPacket = lastPacket;
 		}
 		printf("Warmup summary for port %d:\n", config->portNum);
-		#pragma omp task
+		#pragma omp task firstprivate(config)
 		ilt_dada_packet_comments(config->io->dadaWriter[0].multilog, config->portNum, config->currentPacket, config->startPacket, config->endPacket, config->params->packetsLastExpected, config->params->packetsLastSeen, config->params->packetsExpected, config->params->packetsSeen);
 
 		// Remove old stats before starting the observations
@@ -896,17 +896,19 @@ int ilt_dada_operate_loop(ilt_dada_config *config) {
 
 		finalPacketOffset = (readPackets - 1) * config->packetSize;
 
-		// Check the packets for errors
+		// Check the packets for errors if requested
 		if (config->checkParameters == CHECK_ALL_PACKETS) {
 			for (int packetIdx = 0; packetIdx < (readPackets - 1); packetIdx++) {
 				if (ilt_dada_check_header(config, (unsigned char*) &config->params->packetBuffer[packetIdx * config->packetSize]) < 0) {
-					fprintf(stderr, "ERROR: packet %d port header data corrupted on port %d, exiting.\n\n", packetIdx, config->portNum);
+					fprintf(stderr, "ERROR: packet %d/%d port header data corrupted on port %d, exiting.\n\n", packetIdx, readPackets, config->portNum);
 					return -1;
 				}
 			}
 		} else if (config->checkParameters == CHECK_FIRST_LAST) {
-			if (ilt_dada_check_header(config, (unsigned char*) &config->params->packetBuffer[0]) < 0 || ilt_dada_check_header(config, (unsigned char*) &config->params->packetBuffer[finalPacketOffset]) < 0) {
-				fprintf(stderr, "ERROR: port header data corrupted on port %d, exiting.\n\n", config->portNum);
+			int firstHeader = ilt_dada_check_header(config, (unsigned char*) &config->params->packetBuffer[0]);
+			int lastHeader = ilt_dada_check_header(config, (unsigned char*) &config->params->packetBuffer[finalPacketOffset]);
+			if (firstHeader < 0 || lastHeader < 0) {
+				fprintf(stderr, "ERROR: port first or late header data corrupted on port %d (%d / %d), exiting.\n\n", config->portNum, firstHeader, lastHeader);
 				return -1;
 			}
 		}
@@ -923,6 +925,7 @@ int ilt_dada_operate_loop(ilt_dada_config *config) {
 		// Write the raw packets to the ringbuffer
 		writeBytes = readPackets * config->packetSize;
 		writtenBytes = lofar_udp_io_write(config->io, 0, &(config->params->packetBuffer[0]), writeBytes);
+
 		VERBOSE(printf("%ld, %ld, %ld\n", ipcio_tell(config->io->dadaWriter[0].ringbuffer), ipcio_tell(config->io->dadaWriter[0].ringbuffer) % config->packetSize, ipcio_tell(config->io->dadaWriter[0].ringbuffer) / config->packetSize % 256));
 
 		// Check that all the packets were written
@@ -939,7 +942,7 @@ int ilt_dada_operate_loop(ilt_dada_config *config) {
 		localLoops++;
 		if (localLoops > config->writesPerStatusLog) {
 			localLoops = 0;
-			#pragma omp task
+			#pragma omp task firstprivate(config)
 			ilt_dada_packet_comments(config->io->dadaWriter[0].multilog, config->portNum, config->currentPacket, config->startPacket, config->endPacket, config->params->packetsLastExpected, config->params->packetsLastSeen, config->params->packetsExpected, config->params->packetsSeen);
 			config->params->packetsLastSeen = 0;
 			config->params->packetsLastExpected = 0;
@@ -991,8 +994,9 @@ int ilt_data_operate_prepare(ilt_dada_config *config) {
 		return -1;
 	}
 
+	// TODO: Investigate if it can be more efficient to set msg_iovlen / iov_len to higher values (haven't seen it used like that in any documentation)
 	for (int i = 0; i < config->packetsPerIteration; i++) {
-		// Don't target a specific reciever
+		// Don't target a specific receiver
 		config->params->msgvec[i].msg_hdr.msg_name = NULL;
 		// Point at the buffer for this packet
 		config->params->msgvec[i].msg_hdr.msg_iov = &(config->params->iovecs[i]);
@@ -1019,14 +1023,9 @@ int ilt_data_operate_prepare(ilt_dada_config *config) {
  * @param      config  The recording configuration
  */
 void ilt_dada_operate_cleanup(ilt_dada_config *config) {
-	if (config->params->packetBuffer != NULL)
-		free(config->params->packetBuffer);
-	
-	if (config->params->msgvec != NULL)
-		free(config->params->msgvec);
-	
-	if (config->params->iovecs != NULL)
-		free(config->params->iovecs);
+	FREE_NOT_NULL(config->params->packetBuffer);
+	FREE_NOT_NULL(config->params->msgvec);
+	FREE_NOT_NULL(config->params->iovecs);
 }
 
 /**
@@ -1044,14 +1043,15 @@ void ilt_dada_operate_cleanup(ilt_dada_config *config) {
  * @param      config  The recording configuration
  */
 void ilt_dada_packet_comments(multilog_t *mlog, int portNum, long currentPacket, long startPacket, long endPacket, long packetsLastExpected, long packetsLastSeen, long packetsExpected, long packetsSeen) {
-	char messageBlock[6][2048];
+	const size_t maxlen = 2047;
+	char messageBlock[6][maxlen + 1];
 
-	sprintf(messageBlock[0], "Port %d\tObservation %.1f%% Complete\t\t\tCurrent Packet %ld\n", portNum, 100.0f * (float) (currentPacket - startPacket) / (float) (endPacket - startPacket), currentPacket);
-	sprintf(messageBlock[1], "Packets\t\tExpected\t\tSeen\t\t\tMissed\n");
-	sprintf(messageBlock[2], "N (Current)\t%ld\t\t\t%ld\t\t\t%ld\n", packetsLastExpected, packetsLastSeen, packetsLastExpected - packetsLastSeen);
-	sprintf(messageBlock[3], "%% (Current)\t...\t\t\t%.1f\t\t\t%.1f\n", 100.0f * (float) (packetsLastSeen) / (float) (packetsLastExpected), 100.0f * (float) (packetsLastExpected - packetsLastSeen) / (float) (packetsLastExpected));
-	sprintf(messageBlock[4], "N (Total)\t%ld\t\t\t%ld\t\t\t%ld\n", packetsExpected, packetsSeen, packetsExpected - packetsSeen);
-	sprintf(messageBlock[5], "%% (Total)\t...\t\t\t%.1f\t\t\t%.1f\n", 100.0f * (float) (packetsSeen) / (float) (packetsExpected), 100.0f * (float) (packetsExpected - packetsSeen) / (float) (packetsExpected));
+	snprintf(messageBlock[0], maxlen,"Port %d\tObservation %.1f%% Complete\t\t\tCurrent Packet %ld\n", portNum, 100.0f * (float) (currentPacket - startPacket) / (float) (endPacket - startPacket), currentPacket);
+	snprintf(messageBlock[1], maxlen, "Packets\t\tExpected\t\tSeen\t\t\tMissed\n");
+	snprintf(messageBlock[2], maxlen, "N (Current)\t%ld\t\t\t%ld\t\t\t%ld\n", packetsLastExpected, packetsLastSeen, packetsLastExpected - packetsLastSeen);
+	snprintf(messageBlock[3], maxlen, "%% (Current)\t...\t\t\t%.1f\t\t\t%.1f\n", 100.0f * (float) (packetsLastSeen) / (float) (packetsLastExpected), 100.0f * (float) (packetsLastExpected - packetsLastSeen) / (float) (packetsLastExpected));
+	snprintf(messageBlock[4], maxlen, "N (Total)\t%ld\t\t\t%ld\t\t\t%ld\n", packetsExpected, packetsSeen, packetsExpected - packetsSeen);
+	snprintf(messageBlock[5], maxlen, "%% (Total)\t...\t\t\t%.1f\t\t\t%.1f\n", 100.0f * (float) (packetsSeen) / (float) (packetsExpected), 100.0f * (float) (packetsExpected - packetsSeen) / (float) (packetsExpected));
 	multilog(mlog, 6, "%s%s%s%s%s%s", messageBlock[0], messageBlock[1], messageBlock[2], messageBlock[3], messageBlock[4], messageBlock[5]);
 }
 
@@ -1067,7 +1067,6 @@ void ilt_dada_packet_comments(multilog_t *mlog, int portNum, long currentPacket,
  * @param      config  The recording configuration
  */
 void ilt_dada_cleanup(ilt_dada_config *config) {
-
 
 	// Close the socket if it was successfully created
 	if (config->sockfd != -1) {
