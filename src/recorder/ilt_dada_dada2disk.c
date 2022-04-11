@@ -1,5 +1,6 @@
 #include "ilt_dada.h"
 #include "lofar_cli_meta.h"
+#include "lofar_udp_general.h"
 #include "lofar_udp_io.h"
 
 
