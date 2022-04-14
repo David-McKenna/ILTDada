@@ -230,7 +230,7 @@ time_t unixTimeFromString(char *inputStr) {
 		return -1;
 	}
 
-	return mktime(&tmTime);
+	return timegm(&tmTime);
 }
 
 /**
