@@ -41,7 +41,7 @@ include(FetchContent)
 
 FetchContent_Declare(udpPacketManager
                      GIT_REPOSITORY https://github.com/David-McKenna/udpPacketManager.git
-                     GIT_TAG ed455db335cc0aeba38fdeea165065ebff257637
+                     GIT_TAG readers
                      )
 
 FetchContent_MakeAvailable(udpPacketManager)
