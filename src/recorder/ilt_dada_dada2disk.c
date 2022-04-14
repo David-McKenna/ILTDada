@@ -29,7 +29,7 @@ void helpMessages() {
 	printf("-o (str)        : Output format string (example: output_[[outp]])\n");
 	printf("-n (int)        : Number of ringbuffers to consume data from (default: 1)\n");
 	printf("-m (int)        : Number of packets to consume per operation (default: 4096)\n");
-	printf("-f              : Forcibly rejoin and re-align ringbuffer if needed (default: False)\n");
+	printf("-f              : Write to output regardless of status (existing file, interrupted ringbuffer, etc.) (default: False)\n");
 
 }
 

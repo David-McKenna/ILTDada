@@ -1,5 +1,13 @@
 #include "ilt_dada_cli.h"
 
+const float DEF_OBS_LENGTH = 60.0f;
+const float DEF_BUFFER_TIME = 5.0f;
+
+const int DEF_PACKETS_PER_READ_OP = 256;
+const int DEF_ITERS_PER_CONSOLE_WRITE_OP = 256;
+const int DEF_NUM_OUTPUT = 1;
+const int DEF_NUM_BUFFERS = 64;
+
 void helpMessgaes() {
 	printf("ILTDada CLI (CLI v%s, lib %s)\n\n", ILTD_CLI_VERSION, ILTD_VERSION);
 
@@ -8,10 +16,10 @@ void helpMessgaes() {
 	printf("-p (int):   UDP port to monitor (default: %d)\n", DEF_PORT);
 	printf("-k (int):   Output PSRDADA Ringbuffer key (default: %d)\n\n", DEF_PORT);
 
-	printf("-n (int):   Number of packets per network operation (default: 256)\n");
-	printf("-m (int):   Number of packets blocks per segment of the ringbuffer (default: 64)\n");
-	printf("-s (float): Target ringbuffer length in seconds (determines number of segments in the ringbuffer, default: 5.0)\n");
-	printf("-l (int):   Number of packet writes per network status writes (default: 256)\n");
+	printf("-n (int):   Number of packets per network operation (default: %d)\n", DEF_PACKETS_PER_READ_OP);
+	printf("-m (int):   Number of packets blocks per segment of the ringbuffer (default: %d)\n", DEF_NUM_BUFFERS);
+	printf("-s (float): Target ringbuffer length in seconds (determines number of segments in the ringbuffer, default: %f)\n", DEF_BUFFER_TIME);
+	printf("-l (int):   Number of packet writes per logging status to console (default: %d)\n", DEF_ITERS_PER_CONSOLE_WRITE_OP);
 	printf("-z (float): Network timeout length in seconds (must be greater than 2, default: 30)\n");
 
 	printf("-r (int):   Number of read clients (default: 1)\n");
@@ -42,16 +50,16 @@ int main(int argc, char  *argv[]) {
 	// Initialise some defaults
 	cfg->portNum = DEF_PORT;
 	cfg->io->outputDadaKeys[0] = DEF_PORT;
-	cfg->packetsPerIteration = 256;
+	cfg->packetsPerIteration = DEF_PACKETS_PER_READ_OP;
 	cfg->portBufferSize = 8 * cfg->packetsPerIteration * MAX_UDP_LEN;
 	cfg->io->writeBufSize[0] = cfg->packetsPerIteration * MAX_UDP_LEN;
-	cfg->io->numOutputs = 1;
-	cfg->io->dadaConfig.nbufs = 128;
+	cfg->io->numOutputs = DEF_NUM_OUTPUT;
+	cfg->writesPerStatusLog = DEF_ITERS_PER_CONSOLE_WRITE_OP;
 
 
 	char inputOpt;
-	int bufferMul = 64, packetSizeCopy = -1, minStartup = 60, ignoreTimeCheck = 0;
-	float targetSeconds = 5.0f, obsSeconds = 10.0f;
+	int bufferMul = DEF_NUM_BUFFERS, packetSizeCopy = -1, minStartup = 60, ignoreTimeCheck = 0;
+	float targetSeconds = DEF_BUFFER_TIME, obsSeconds = DEF_OBS_LENGTH;
 	char startTime[DEF_STR_LEN] = "", endTime[DEF_STR_LEN] = "";
 
 	char *endPtr = NULL, flagged = 0;

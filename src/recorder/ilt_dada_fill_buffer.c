@@ -17,6 +17,20 @@
 
 #define PACKET_SIZE (UDPHDRLEN + UDPNPOL * UDPNTIMESLICE * 122)
 
+void helpMessages() {
+	printf("ILTDada fillbuffer (CLI v%s, lib %s)\n\n", ILTD_CLI_VERSION, ILTD_VERSION);
+
+	printf("-h				: Display this message\n");
+	printf("-k (int)		: Target DADA buffer (default, output to ringbuffer at %d)\n", DEF_PORT);
+	printf("-u (int,int)	: Target port and offset between ports (default, e.g., %d,1)\n", DEF_PORT);
+	printf("-H (str)		: Target machine IP (e.g., localhost, my.server.com)\n");
+	printf("-i (str)		: Input raw data file\n");
+	printf("-p (int)		: Packets loaded and sent per operation (default: 1024)\n\t\tIf this option is set to 0, data will be written directly to the ringbuffer set by '-k'\n");
+	printf("-n (int)		: Number of target ports (default: 1)\n");
+	printf("-t (int)		: Total number of pakcets to loadand send (default: entire input)\n");
+	printf("-w (int)		: Time in milliseconds to wait between starting operations (default: 1) (upper limit on throughput, may not be reached if disks / CPU are too slow)\n\n");
+}
+
 int main(int argc, char *argv[]) {
 
 	int inputOpt, packets = 0, waitTime = 1;
@@ -36,7 +50,7 @@ int main(int argc, char *argv[]) {
 	config[0]->io->outputDadaKeys[0] = DEF_PORT;
 	config[0]->recvflags = -1;
 
-	while((inputOpt = getopt(argc, argv, "u:H:i:p:n:k:t:w:")) != -1) {
+	while((inputOpt = getopt(argc, argv, "u:H:i:p:n:k:t:w:h")) != -1) {
 		switch(inputOpt) {
 
 			case 'u':
@@ -76,6 +90,10 @@ int main(int argc, char *argv[]) {
 			case 'w':
 				waitTime = atoi(optarg);
 				break;
+
+			case 'h':
+				helpMessages();
+				return 0;
 
 			default:
 				fprintf(stderr, "ERROR: Unknown input %c, exiting.\n", inputOpt);

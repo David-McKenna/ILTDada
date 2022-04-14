@@ -23,8 +23,11 @@ installed prior to building the software
 On Debian-based systems, these can be installed with apt, while recent CMake versions can be installed with Python's pip package manager.
 
 ```shell
-sudo apt install autoconf clang csh git libhdf5-dev libtool wget
+sudo apt install autoconf csh git libhdf5-dev libtool wget
 sudo python3 -m pip install --upgrade cmake
+
+# Optional
+apt-get install clang libomp-dev libomp5
 ```
 
 ### Linux Kernel Requirements
