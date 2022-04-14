@@ -175,7 +175,7 @@ int main(int argc, char  *argv[]) {
 		ilt_dada_cleanup(cfg);
 		return 1;
 	}
-	cfg->io->dadaConfig.nbufs = targetSeconds * packetRate / cfg->packetsPerIteration / bufferMul;
+	cfg->io->dadaConfig.nbufs = targetSeconds * packetRate / (cfg->packetsPerIteration * bufferMul);
 
 
 	if (ilt_dada_cli_check_times(startTime, endTime, obsSeconds, ignoreTimeCheck, minStartup) < 0) {
@@ -196,13 +196,15 @@ int main(int argc, char  *argv[]) {
 
 	// TODO: Rework / add clock bit flag so we can test this before we enter a sleep state
 	// Convert the start time to a packet
-	// Fallback to 200MHz clock if bit is not set.
-	cfg->startPacket = lofar_udp_time_get_packet_from_isot(startTime, cfg->obsClockBit > 2 ? 0 : cfg->obsClockBit);
+	// Fallback to 200MHz clock (bit = 1) if bit is not set.
+	cfg->startPacket = lofar_udp_time_get_packet_from_isot(startTime, cfg->obsClockBit > 2 ? 1 : cfg->obsClockBit);
 
 	if (strcmp(endTime, "") != 0) {
-		cfg->endPacket = lofar_udp_time_get_packet_from_isot(endTime, cfg->obsClockBit > 2 ? 0 : cfg->obsClockBit);
+		cfg->endPacket = lofar_udp_time_get_packet_from_isot(endTime, cfg->obsClockBit > 2 ? 1 : cfg->obsClockBit);
 
 	}
+
+
 
 
 	if (cfg->packetSize != packetSizeCopy && packetSizeCopy != -1) {
@@ -210,7 +212,7 @@ int main(int argc, char  *argv[]) {
 	}
 
 	printf("Preparing ILTDada to record data from port %d, consuming %d packets per iteration.\n", cfg->portNum, cfg->packetsPerIteration);
-	printf("Ringbuffer on key %d (ptr %x) will require %ld MB (%ld GB) of memory to hold ~%ld seconds of data in %" PRIu64 " buffers.\n", cfg->io->outputDadaKeys[0], cfg->io->outputDadaKeys[0], cfg->io->writeBufSize[0] * cfg->io->dadaConfig.nbufs >> 20, cfg->io->writeBufSize[0] * cfg->io->dadaConfig.nbufs >> 30, cfg->packetsPerIteration * cfg->io->dadaConfig.nbufs / 12207, cfg->io->dadaConfig.nbufs);
+	printf("Ringbuffer on key %d (ptr %x) will require %ld MB (%ld GB) of memory to hold ~%.1f seconds of data in %" PRIu64 " buffers.\n", cfg->io->outputDadaKeys[0], cfg->io->outputDadaKeys[0], cfg->io->writeBufSize[0] * cfg->io->dadaConfig.nbufs >> 20, cfg->io->writeBufSize[0] * cfg->io->dadaConfig.nbufs >> 30, (bufferMul * cfg->packetsPerIteration * cfg->io->dadaConfig.nbufs) / packetRate, cfg->io->dadaConfig.nbufs);
 	printf("Start/End packets will be %ld and %ld.\n\n", cfg->startPacket, cfg->endPacket);
 
 	printf("Preparing to start recording...\n");
@@ -254,32 +256,38 @@ time_t unixTimeFromString(char *inputStr) {
  */
 int ilt_dada_cli_check_times(char *startTime, char *endTime, double obsSeconds, int ignoreTimeCheck, int minStartup) {
 	time_t currTime, startUnixTime, endUnixTime;
-	time(&currTime);
+	
+	// Get the current Unix time for reference
+	if (time(&currTime) == -1) {
+		fprintf(stderr, "ERROR: Failed to get current time, exiting.\n");
+		return -1;
+	}
+
 	// If we haven't been passed a time, set it to the current time.
 	if (strcmp(startTime, "") == 0) {
 		strftime(startTime, DEF_STR_LEN * sizeof(char), "%Y-%m-%dT%H:%M:%S", gmtime(&currTime));
 
-		printf("INFO: Input time not set, setting start time to current time of %s\n.", startTime);
+		printf("INFO: Input time not set, setting start time to current time of %s.\n", startTime);
 	}
 
-	
+
 	if ((startUnixTime = unixTimeFromString(startTime)) == -1) {
-		fprintf(stderr, "ERROR: Failed to convert input start time %s to a unix timstamp, exiting.\n", startTime);
-		return 1;
+		fprintf(stderr, "ERROR: Failed to convert input start time %s to a unix timstamp, expected format 'YYYY-mm-DDTHH:MM:SS', exiting.\n", startTime);
+		return -1;
 	}
 
 	if (strcmp(endTime, "") == 0) {
 		endUnixTime = startUnixTime + obsSeconds;
 		strftime(endTime, DEF_STR_LEN * sizeof(char), "%Y-%m-%dT%H:%M:%S", gmtime(&endUnixTime));
 
-		printf("INFO: End time set to %s\n.", endTime);
+		printf("INFO: End time set to %s from %ld + %lf\n.", endTime, startUnixTime, obsSeconds);
 	} else {
 		if ((endUnixTime = unixTimeFromString(endTime)) == -1) {
 			fprintf(stderr, "ERROR: Failed to convert input end time %s to a unix timstamp, exiting.\n", endTime);
 			return -1;
 		}
 
-		if (obsSeconds != 60.0f) {
+		if (obsSeconds != DEF_OBS_LENGTH) {
 			fprintf(stderr, "WARNING: Ignoring input observation length (%lf) and using input end time instead (%s).\n", obsSeconds, endTime);
 		}
 	}
@@ -289,12 +297,11 @@ int ilt_dada_cli_check_times(char *startTime, char *endTime, double obsSeconds, 
 			fprintf(stderr, "ERROR: End time %s has already passed, exiting.\n\n", endTime);
 			return -1;
 		}
-	}
-
-
-	if (endUnixTime < startUnixTime) {
-		fprintf(stderr, "ERROR: End time %s is before start time %s, exiting.\n", endTime, startTime);
-		return -1;
+		
+		if (endUnixTime < startUnixTime) {
+			fprintf(stderr, "ERROR: End time %s is before start time %s, exiting.\n", endTime, startTime);
+			return -1;
+		}
 	}
 
 	if ((startUnixTime - currTime) > minStartup) {

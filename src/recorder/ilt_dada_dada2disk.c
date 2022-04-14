@@ -43,10 +43,10 @@ int main(int argc, char  *argv[]) {
 	meta->packetsPerIteration = 4096;
 	meta->numPorts = 1;
 
-	lofar_udp_io_read_config *rdrConfig = calloc(1, sizeof(lofar_udp_io_read_config));
+	lofar_udp_io_read_config *rdrConfig = lofar_udp_io_alloc_read();
 	(*rdrConfig) = lofar_udp_io_read_config_default;
 
-	lofar_udp_io_write_config *wrtConfig = calloc(1, sizeof(lofar_udp_io_write_config));
+	lofar_udp_io_write_config *wrtConfig = lofar_udp_io_alloc_write();
 	(*wrtConfig) = lofar_udp_io_write_config_default;
 
 	char tmpHeaders[MAX_NUM_PORTS][UDPHDRLEN];
