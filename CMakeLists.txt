@@ -13,7 +13,7 @@ if(CMAKE_BUILD_TYPE STREQUAL Debug)
 endif()
 
 # Describe the project
-project(ilt_dada 	VERSION 0.1.0
+project(ilt_dada 	VERSION 0.2.0
 					DESCRIPTION "PSRDADA based recorder for international LOFAR stations."
 					LANGUAGES C CXX
 )
@@ -41,7 +41,7 @@ include(FetchContent)
 
 FetchContent_Declare(udpPacketManager
                      GIT_REPOSITORY https://github.com/David-McKenna/udpPacketManager.git
-                     GIT_TAG readers
+                     GIT_TAG stokesChannelisationFixes
                      )
 
 FetchContent_MakeAvailable(udpPacketManager)
