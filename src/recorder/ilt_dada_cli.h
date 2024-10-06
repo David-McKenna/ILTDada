@@ -14,7 +14,7 @@ extern "C" {
 #endif 
 
 int main(int argc, char  *argv[]);
-time_t unixTimeFromString(char *inputStr);
+time_t unixTimeFromString(const char *inputStr);
 int ilt_dada_cli_check_times(char *startTime, char *endTime, double obsSeconds, int ignoreTimeCheck, int minStartup);
 
 #ifdef __cplusplus
