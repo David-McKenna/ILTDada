@@ -77,7 +77,7 @@ target_include_directories(iltdada PUBLIC
 )
 file(GLOB_RECURSE ILTD_INCLUDE_FILES "${PROJECT_SOURCE_DIR}/src/lib/*.h" "${PROJECT_BINARY_DIR}/src/lib/*.h")
 
-target_link_libraries(iltdada PUBLIC lofudpman lofudpman_cli)
+target_link_libraries(iltdada PUBLIC lofudpman)
 
 # Set a few extra compiler options
 set(CMAKE_CXX_IMPLICIT_LINK_LIBRARIES "")
@@ -91,13 +91,13 @@ target_link_libraries(iltdada PUBLIC OpenMP::OpenMP_CXX OpenMP::OpenMP_C)
 
 # Setup the CLIs
 add_executable(ilt_dada_cli src/recorder/ilt_dada_cli.c)
-target_link_libraries(ilt_dada_cli PUBLIC iltdada)
+target_link_libraries(ilt_dada_cli PUBLIC iltdada lofupdman_cli)
 
 add_executable(ilt_dada_dada2disk src/recorder/ilt_dada_dada2disk.c)
-target_link_libraries(ilt_dada_dada2disk PUBLIC iltdada)
+target_link_libraries(ilt_dada_dada2disk PUBLIC iltdada lofudpman_cli)
 
 add_executable(ilt_dada_fill_buffer src/recorder/ilt_dada_fill_buffer.c)
-target_link_libraries(ilt_dada_fill_buffer PUBLIC iltdada)
+target_link_libraries(ilt_dada_fill_buffer PUBLIC iltdada lofudpman_cli)
 
 
 include(CMakePackageConfigHelpers)
