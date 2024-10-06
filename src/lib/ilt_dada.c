@@ -690,9 +690,9 @@ int ilt_dada_setup_ringbuffer(ilt_dada_config *config) {
 				fprintf(stderr, "ERROR: Failed to attach to given ringbuffer %d, attempting to destroy given keys and then will try to connect again.\n", config->io->outputDadaKeys[0]);
 
 				// Cleanup the state of the I/O struct
-				FREE_NOT_NULL(config->io->dadaWriter[0].ringbuffer);
-				FREE_NOT_NULL(config->io->dadaWriter[0].header);
-				lofar_udp_io_write_cleanup(config->io, 0, 1);
+				FREE_NOT_NULL(config->io->dadaWriter[0].hdu->data_block);
+				FREE_NOT_NULL(config->io->dadaWriter[0].hdu->header_block);
+				lofar_udp_io_write_cleanup(config->io, 1);
 
 				if (ilt_dada_connect_and_destroy_ringbuffer(config->io->outputDadaKeys[0]) < 0) {
 					return -1;
@@ -846,7 +846,7 @@ int ilt_dada_operate_loop(ilt_dada_config *config) {
 			if (lastPacket >= (config->startPacket - config->packetsPerIteration)) {
 				// TODO: assumes no packets loss
 				writeBytes = readPackets * config->packetSize;
-				writtenBytes = ipcio_write(config->io->dadaWriter[0].ringbuffer, &(config->params->packetBuffer[0]), writeBytes);
+				writtenBytes = ipcio_write(config->io->dadaWriter[0].hdu->data_block, &(config->params->packetBuffer[0]), writeBytes);
 
 				if (writtenBytes < 0) {
 					fprintf(stderr, "ERROR Port %d: Failed to write data to ringbuffer %d, exiting.\n", config->portNum, config->io->outputDadaKeys[0]);
@@ -926,7 +926,7 @@ int ilt_dada_operate_loop(ilt_dada_config *config) {
 		writeBytes = readPackets * config->packetSize;
 		writtenBytes = lofar_udp_io_write(config->io, 0, &(config->params->packetBuffer[0]), writeBytes);
 
-		VERBOSE(printf("%ld, %ld, %ld\n", ipcio_tell(config->io->dadaWriter[0].ringbuffer), ipcio_tell(config->io->dadaWriter[0].ringbuffer) % config->packetSize, ipcio_tell(config->io->dadaWriter[0].ringbuffer) / config->packetSize % 256));
+		VERBOSE(printf("%ld, %ld, %ld\n", ipcio_tell(config->io->dadaWriter[0].hdu->data_block), ipcio_tell(config->io->dadaWriter[0].hdu->data_block) % config->packetSize, ipcio_tell(config->io->dadaWriter[0].hdu->data_block) / config->packetSize % 256));
 
 		// Check that all the packets were written
 		if (writtenBytes < 0) {
@@ -1073,7 +1073,7 @@ void ilt_dada_cleanup(ilt_dada_config *config) {
 		shutdown(config->sockfd, SHUT_RDWR);
 	}
 
-	lofar_udp_io_write_cleanup(config->io, 0, 1);
+	lofar_udp_io_write_cleanup(config->io, 1);
 	config->state = UNINITIALISED;
 	FREE_NOT_NULL(config->params);
 	FREE_NOT_NULL(config->io);
