@@ -153,13 +153,13 @@ int main(int argc, char  *argv[]) {
 
 			default:
 				fprintf(stderr, "ERROR: Unknown flag %c, exiting.\n", inputOpt);
-				ilt_dada_cleanup(cfg);
+				ilt_dada_config_cleanup(cfg);
 				return 1;
 		}
 	}
 
 	if (flagged) {
-		ilt_dada_cleanup(cfg);
+		ilt_dada_config_cleanup(cfg);
 		return 1;
 	}
 
@@ -172,14 +172,14 @@ int main(int argc, char  *argv[]) {
 	float packetRate = 12207.0f;
 	if (((float) bufferMul * cfg->packetsPerIteration) / packetRate > targetSeconds) {
 		fprintf(stderr, "ERROR: Requested time is less than the size of a single buffer (%f vs %f); increase -s or decrease -m, exiting.\n", ((float) bufferMul * cfg->packetsPerIteration) / packetRate, targetSeconds);
-		ilt_dada_cleanup(cfg);
+		ilt_dada_config_cleanup(cfg);
 		return 1;
 	}
 	cfg->io->dadaConfig.nbufs = targetSeconds * packetRate / (cfg->packetsPerIteration * bufferMul);
 
 
 	if (ilt_dada_cli_check_times(startTime, endTime, obsSeconds, ignoreTimeCheck, minStartup) < 0) {
-		ilt_dada_cleanup(cfg);
+		ilt_dada_config_cleanup(cfg);
 		return 1;
 	}
 
@@ -189,8 +189,8 @@ int main(int argc, char  *argv[]) {
 	}
 	printf(".\n");
 
-	if (ilt_dada_setup(cfg, cfg->packetSize != -1) < 0) {
-		ilt_dada_cleanup(cfg);
+	if (ilt_dada_config_setup(cfg, cfg->packetSize != -1) < 0) {
+		ilt_dada_config_cleanup(cfg);
 		return 1;
 	}
 
@@ -218,12 +218,12 @@ int main(int argc, char  *argv[]) {
 	printf("Preparing to start recording...\n");
 	if (ilt_dada_operate(cfg) < 0) {
 		printf("Exiting.\n");
-		ilt_dada_cleanup(cfg);
+		ilt_dada_config_cleanup(cfg);
 		return 1;
 	}
 
 	printf("Observation finished, cleaning up.\n");
-	ilt_dada_cleanup(cfg);
+	ilt_dada_config_cleanup(cfg);
 
 	return 0;
 }

@@ -114,23 +114,28 @@ ilt_dada_config* ilt_dada_init() {
 	} 
 
 	// Assign the default values
-	*(config) = ilt_dada_config_default;
+	if (memcpy(config, &(ilt_dada_config_default), sizeof(ilt_dada_config)) != config) {
+		fprintf(stderr, "ERROR: Failed to copy config default, exiting.\n");
+		ilt_dada_config_cleanup(config);
+		return NULL;
+	}
 
-	// Allocate an null-check the operations and I/O structs
+	// Allocate and null-check the operations and I/O structs
 	config->params = calloc(1, sizeof(ilt_dada_operate_params));
-	config->io = calloc(1, sizeof(lofar_udp_io_write_config));
+	config->io = lofar_udp_io_write_alloc();
 
 	if (config->params == NULL || config->io == NULL) {
 		fprintf(stderr, "ERROR: Failed to allocate memory for configuration struct components, exiting.\n");
-		FREE_NOT_NULL(config->params);
-		FREE_NOT_NULL(config->io);
-		FREE_NOT_NULL(config);
+		ilt_dada_config_cleanup(config);
 		return NULL;
 	}
 
 	// Assign the default values, adapted for the recorder
-	*(config->io) = lofar_udp_io_write_config_default;
-	*(config->params) = ilt_dada_operate_params_default;
+	if (memcpy(config->params, &(ilt_dada_operate_params_default), sizeof(ilt_dada_operate_params)) != config->params) {
+		fprintf(stderr, "ERROR: Failed to copy params default, exiting.\n");
+		ilt_dada_cleanup(config);
+		return NULL;
+	}
 	config->io->readerType = DADA_ACTIVE;
 
 	return config;
@@ -480,7 +485,7 @@ int ilt_dada_check_config(ilt_dada_config *config, config_states expectedState) 
  *
  * @return     0 (success) / -1 (failure)
  */
-int ilt_dada_setup(ilt_dada_config *config, int setup_io) {
+int ilt_dada_config_setup(ilt_dada_config *config, int setup_io) {
 
 	// Sanity check the input
 	if (ilt_dada_check_config(config, 0) < 0) {
@@ -1016,18 +1021,6 @@ int ilt_data_operate_prepare(ilt_dada_config *config) {
 	return 0;
 }
 
-
-/**
- * @brief      Cleanup the memory allocated to receive packets via recvmmsg
- *
- * @param      config  The recording configuration
- */
-void ilt_dada_operate_cleanup(ilt_dada_config *config) {
-	FREE_NOT_NULL(config->params->packetBuffer);
-	FREE_NOT_NULL(config->params->msgvec);
-	FREE_NOT_NULL(config->params->iovecs);
-}
-
 /**
  * @brief      Log information on packet loss, total observed packets
  *
@@ -1066,17 +1059,22 @@ void ilt_dada_packet_comments(multilog_t *mlog, int portNum, long currentPacket,
  *
  * @param      config  The recording configuration
  */
-void ilt_dada_cleanup(ilt_dada_config *config) {
+void ilt_dada_config_cleanup(ilt_dada_config *config) {
+
+	if (config->params != NULL) {
+		FREE_NOT_NULL(config->params->packetBuffer);
+		FREE_NOT_NULL(config->params->msgvec);
+		FREE_NOT_NULL(config->params->iovecs);
+		FREE_NOT_NULL(config->params->timeout);
+		FREE_NOT_NULL(config->params);
+	}
+	lofar_udp_io_write_cleanup(config->io, 1);
 
 	// Close the socket if it was successfully created
 	if (config->sockfd != -1) {
 		shutdown(config->sockfd, SHUT_RDWR);
 	}
 
-	lofar_udp_io_write_cleanup(config->io, 1);
-	config->state = UNINITIALISED;
-	FREE_NOT_NULL(config->params);
-	FREE_NOT_NULL(config->io);
 	FREE_NOT_NULL(config);
 }
 
