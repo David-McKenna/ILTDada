@@ -1,10 +1,8 @@
 #include "ilt_dada.h"
 #include "lofar_cli_meta.h"
-#include "lofar_udp_general.h"
-#include "lofar_udp_io.h"
 
 
-void CLICleanup(int numPorts, lofar_udp_io_read_config *rdrConfig, lofar_udp_io_write_config *wrtConfig, lofar_udp_config *config, lofar_udp_obs_meta *meta, char **rawData) {
+void CLICleanup(int numPorts, lofar_udp_io_read_config *rdrConfig, lofar_udp_io_write_config *wrtConfig, lofar_udp_config *config, lofar_udp_obs_meta *meta, int8_t **rawData) {
 
 	for (int port = 0; port < numPorts; port++) {
 		if (rawData != NULL) {
@@ -47,7 +45,7 @@ int main(int argc, char  *argv[]) {
 	lofar_udp_io_write_config *wrtConfig = lofar_udp_io_write_alloc();
 	(*wrtConfig) = lofar_udp_io_write_config_default;
 
-	char tmpHeaders[MAX_NUM_PORTS][UDPHDRLEN];
+	int8_t tmpHeaders[MAX_NUM_PORTS][UDPHDRLEN];
 	int8_t *rawData[MAX_NUM_PORTS];
 	long charsPerRead[MAX_NUM_PORTS];
 
@@ -59,7 +57,7 @@ int main(int argc, char  *argv[]) {
 	ARR_INIT(rawData, MAX_NUM_PORTS, NULL);
 	ARR_INIT(charsPerRead, MAX_NUM_PORTS, 0);
 
-	char inputOpt;
+	int8_t inputOpt;
 	int inputProvided = 0, outputProvided = 0, ringbufferOffset = 10, parsed;
 	while((inputOpt = getopt(argc, argv, "i:o:n:m:fh")) != -1) {
 		switch (inputOpt) {
@@ -135,7 +133,7 @@ int main(int argc, char  *argv[]) {
 	}
 
 	// Extract metadata from the headers
-	int emtpyBeamlets[2] = { 0 };
+	const int16_t emtpyBeamlets[2] = { 0 };
 	if (_lofar_udp_parse_header_buffers(meta, tmpHeaders, emtpyBeamlets) < 0) {
 		CLICleanup(meta->numPorts, rdrConfig, wrtConfig, config, meta, NULL);
 		return 1;

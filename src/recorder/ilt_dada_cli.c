@@ -1,4 +1,5 @@
 #include "ilt_dada_cli.h"
+#include "lofar_cli_meta.h"
 
 const float DEF_OBS_LENGTH = 60.0f;
 const float DEF_BUFFER_TIME = 5.0f;
