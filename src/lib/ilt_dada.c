@@ -773,7 +773,6 @@ int ilt_dada_operate(ilt_dada_config *config) {
 
 	VERBOSE(printf("Network\n"));
 	if (ilt_dada_check_network(config, 0) < 0) {
-		ilt_dada_operate_cleanup(config);
 		return -1;
 	}
 
@@ -793,17 +792,12 @@ int ilt_dada_operate(ilt_dada_config *config) {
 	VERBOSE(printf("Loop\n"));
 	// Read new data from the port until the observation ends
 	if (ilt_dada_operate_loop(config) < 0) {
-		ilt_dada_operate_cleanup(config);
 		return -1;
 	}
 
 	// Print debug information about the observing run
 	printf("Observation completed. Cleaning up. Final summary:\n");
 	ilt_dada_packet_comments(config->io->dadaWriter[0].multilog, config->portNum, config->currentPacket, config->startPacket, config->endPacket, config->params->packetsLastExpected, config->params->packetsLastSeen, config->params->packetsExpected, config->params->packetsSeen);
-
-
-	// Cleanup network and ringbuffer allocations
-	ilt_dada_operate_cleanup(config);
 
 	// Clean exit
 	return 0;
