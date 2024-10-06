@@ -43,7 +43,6 @@ FetchContent_Declare(udpPacketManager
                      GIT_REPOSITORY https://github.com/David-McKenna/udpPacketManager.git
                      GIT_TAG stokesChannelisationFixes
                      )
-
 FetchContent_MakeAvailable(udpPacketManager)
 
 message("")
@@ -58,7 +57,7 @@ message("")
 
 # Include compile-time parameters into the main header
 configure_file(	"${PROJECT_SOURCE_DIR}/src/lib/ilt_dada.h.in"
-				"${PROJECT_SOURCE_DIR}/src/lib/ilt_dada.h"
+				"${PROJECT_BINARY_DIR}/src/lib/ilt_dada.h"
 )
 
 
@@ -73,8 +72,9 @@ add_dependencies(iltdada lofudpman)
 # Include all of our headers
 target_include_directories(iltdada PUBLIC
 		${PROJECT_SOURCE_DIR}/src/lib
+		${PROJECT_BINARY_DIR}/src/lib
 )
-file(GLOB_RECURSE ILTD_INCLUDE_FILES "${PROJECT_SOURCE_DIR}/src/lib/*.h")
+file(GLOB_RECURSE ILTD_INCLUDE_FILES "${PROJECT_SOURCE_DIR}/src/lib/*.h" "${PROJECT_BINARY_DIR}/src/lib/*.h")
 
 target_link_libraries(iltdada PUBLIC lofudpman)
 
