@@ -58,6 +58,7 @@ message("")
 # Include compile-time parameters into the main header
 configure_file(	"${PROJECT_SOURCE_DIR}/src/lib/ilt_dada.h.in"
 				"${PROJECT_BINARY_DIR}/src/lib/ilt_dada.h"
+				@ONLY
 )
 
 
@@ -65,7 +66,7 @@ configure_file(	"${PROJECT_SOURCE_DIR}/src/lib/ilt_dada.h.in"
 add_library(iltdada STATIC
             src/lib/ilt_dada.c)
 
-add_dependencies(iltdada lofudpman)
+add_dependencies(iltdada lofudpman lofudpman_cli)
 
 
 
@@ -76,7 +77,7 @@ target_include_directories(iltdada PUBLIC
 )
 file(GLOB_RECURSE ILTD_INCLUDE_FILES "${PROJECT_SOURCE_DIR}/src/lib/*.h" "${PROJECT_BINARY_DIR}/src/lib/*.h")
 
-target_link_libraries(iltdada PUBLIC lofudpman)
+target_link_libraries(iltdada PUBLIC lofudpman lofudpman_cli)
 
 # Set a few extra compiler options
 set(CMAKE_CXX_IMPLICIT_LINK_LIBRARIES "")

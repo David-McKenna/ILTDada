@@ -8,7 +8,7 @@ const int DEF_ITERS_PER_CONSOLE_WRITE_OP = 256;
 const int DEF_NUM_OUTPUT = 1;
 const int DEF_NUM_BUFFERS = 64;
 
-void helpMessgaes() {
+void iltd_helpMessages() {
 	printf("ILTDada CLI (CLI v%s, lib %s)\n\n", ILTD_CLI_VERSION, ILTD_VERSION);
 
 	printf("-h      :   Display this message\n\n");
@@ -41,7 +41,7 @@ void helpMessgaes() {
 int main(int argc, char  *argv[]) {
 
 	if (argc == 1) {
-		helpMessgaes();
+		iltd_helpMessages();
 		return 1;
 	}
 
@@ -68,7 +68,7 @@ int main(int argc, char  *argv[]) {
 		switch (inputOpt) {
 
 			case 'h':
-				helpMessgaes();
+				iltd_helpMessages();
 				flagged = 1;
 				break;
 
