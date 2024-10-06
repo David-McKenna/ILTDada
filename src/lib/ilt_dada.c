@@ -133,7 +133,7 @@ ilt_dada_config* ilt_dada_init() {
 	// Assign the default values, adapted for the recorder
 	if (memcpy(config->params, &(ilt_dada_operate_params_default), sizeof(ilt_dada_operate_params)) != config->params) {
 		fprintf(stderr, "ERROR: Failed to copy params default, exiting.\n");
-		ilt_dada_cleanup(config);
+		ilt_dada_config_cleanup(config);
 		return NULL;
 	}
 	config->io->readerType = DADA_ACTIVE;
