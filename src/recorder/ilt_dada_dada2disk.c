@@ -4,17 +4,17 @@
 #include "lofar_udp_io.h"
 
 
-void CLICleanup(int numPorts, lofar_udp_io_read_config *rdrConfig, lofar_udp_io_write_config *wrtConfig, lofar_udp_config *config, lofar_udp_input_meta *meta, char **rawData) {
+void CLICleanup(int numPorts, lofar_udp_io_read_config *rdrConfig, lofar_udp_io_write_config *wrtConfig, lofar_udp_config *config, lofar_udp_obs_meta *meta, char **rawData) {
 
 	for (int port = 0; port < numPorts; port++) {
 		if (rawData != NULL) {
 			FREE_NOT_NULL(rawData[port]);
 		}
 
-		lofar_udp_io_read_cleanup(rdrConfig, port);
-		lofar_udp_io_write_cleanup(wrtConfig, port, 1);
 
 	}
+	lofar_udp_io_read_cleanup(rdrConfig);
+	lofar_udp_io_write_cleanup(wrtConfig, 1);
 
 	FREE_NOT_NULL(config);
 	FREE_NOT_NULL(meta);
@@ -35,22 +35,20 @@ void helpMessages() {
 
 int main(int argc, char  *argv[]) {
 	
-	lofar_udp_config *config = calloc(1, sizeof(lofar_udp_config));
-	(*config) = lofar_udp_config_default;
+	lofar_udp_config *config = lofar_udp_config_alloc();
 
-	lofar_udp_input_meta *meta = calloc(1, sizeof(lofar_udp_input_meta));
-	(*meta) = lofar_udp_input_meta_default;
+	lofar_udp_obs_meta *meta = _lofar_udp_obs_meta_alloc();
 	meta->packetsPerIteration = 4096;
 	meta->numPorts = 1;
 
-	lofar_udp_io_read_config *rdrConfig = lofar_udp_io_alloc_read();
+	lofar_udp_io_read_config *rdrConfig = lofar_udp_io_read_alloc();
 	(*rdrConfig) = lofar_udp_io_read_config_default;
 
-	lofar_udp_io_write_config *wrtConfig = lofar_udp_io_alloc_write();
+	lofar_udp_io_write_config *wrtConfig = lofar_udp_io_write_alloc();
 	(*wrtConfig) = lofar_udp_io_write_config_default;
 
 	char tmpHeaders[MAX_NUM_PORTS][UDPHDRLEN];
-	char *rawData[MAX_NUM_PORTS];
+	int8_t *rawData[MAX_NUM_PORTS];
 	long charsPerRead[MAX_NUM_PORTS];
 
 
@@ -66,7 +64,7 @@ int main(int argc, char  *argv[]) {
 	while((inputOpt = getopt(argc, argv, "i:o:n:m:fh")) != -1) {
 		switch (inputOpt) {
 			case 'i':
-				parsed = sscanf(optarg, "%d,%d", &(config->dadaKeys[0]), &ringbufferOffset);
+				parsed = sscanf(optarg, "%d,%d", &(config->inputDadaKeys[0]), &ringbufferOffset);
 				if (parsed < 1) {
 					fprintf(stderr, "ERROR: Failed to parse input ringbuffer / offset (sscanf returned %d), exiting.\n", parsed);
 					CLICleanup(meta->numPorts, rdrConfig, wrtConfig, config, meta, NULL);
@@ -123,13 +121,14 @@ int main(int argc, char  *argv[]) {
 
 	if (ringbufferOffset == 1 || ringbufferOffset == -1) {
 		fprintf(stderr, "ERROR: Ringbuffer offset set to %d, but this will result in overlapping ringbuffers and DADA headers, exiting.\n", ringbufferOffset);
+		CLICleanup(meta->numPorts, rdrConfig, wrtConfig, config, meta, NULL);
 		return 1;
 	}
 
 	// Read in headers from the input
-	for (int port = 0; port < meta->numPorts; port++) {
-		config->dadaKeys[port] = config->dadaKeys[0] + port * ringbufferOffset;
-		if (lofar_udp_io_read_temp_DADA(tmpHeaders[port], sizeof(char), UDPHDRLEN, config->dadaKeys[port], 1) < UDPHDRLEN) {
+	for (int port = 1; port < meta->numPorts; port++) {
+		config->inputDadaKeys[port] = config->inputDadaKeys[0] + port * ringbufferOffset;
+		if (_lofar_udp_io_read_temp_DADA(tmpHeaders[port], sizeof(int8_t), UDPHDRLEN, config->inputDadaKeys[port], 1) < UDPHDRLEN) {
 			CLICleanup(meta->numPorts, rdrConfig, wrtConfig, config, meta, NULL);
 			return 1;
 		}
@@ -137,13 +136,13 @@ int main(int argc, char  *argv[]) {
 
 	// Extract metadata from the headers
 	int emtpyBeamlets[2] = { 0 };
-	if (lofar_udp_parse_headers(meta, tmpHeaders, emtpyBeamlets) < 0) {
+	if (_lofar_udp_parse_header_buffers(meta, tmpHeaders, emtpyBeamlets) < 0) {
 		CLICleanup(meta->numPorts, rdrConfig, wrtConfig, config, meta, NULL);
 		return 1;
 	}
 
 	for (int port = 0; port < meta->numPorts; port++) {
-		rawData[port] = calloc(meta->packetsPerIteration * meta->portPacketLength[port], sizeof(char));
+		rawData[port] = calloc(meta->packetsPerIteration * meta->portPacketLength[port], sizeof(int8_t));
 		charsPerRead[port] = meta->packetsPerIteration * meta->portPacketLength[port] * (long) sizeof(char);
 		if (rawData[port] == NULL) {
 			fprintf(stderr, "ERROR: Failed to allocate %ld bytes for buffer %d, exiting.\n", meta->packetsPerIteration * meta->portPacketLength[port] * sizeof(char), port);
@@ -155,7 +154,7 @@ int main(int argc, char  *argv[]) {
 	// Setup the readers
 	rdrConfig->readerType = DADA_ACTIVE;
 	for (int port = 0; port < meta->numPorts; port++) {
-		if (lofar_udp_io_read_setup_helper(rdrConfig, config, meta, port) < 0) {
+		if (lofar_udp_io_read_setup_helper(rdrConfig, rawData, meta->packetsPerIteration * meta->portPacketLength[port], port) < 0) {
 			CLICleanup(meta->numPorts, rdrConfig, wrtConfig, config, meta, rawData);
 			return 1;
 		}
@@ -163,7 +162,7 @@ int main(int argc, char  *argv[]) {
 
 	// Setup the writers
 	for (int outp = 0; outp < meta->numPorts; outp++) {
-		if (lofar_udp_io_write_setup_helper(wrtConfig, meta, 0) < 0) {
+		if (_lofar_udp_io_write_internal_meta_setup_helper(wrtConfig, meta, 0) < 0) {
 			CLICleanup(meta->numPorts, rdrConfig, wrtConfig, config, meta, rawData);
 			return 1;
 		}
@@ -174,7 +173,7 @@ int main(int argc, char  *argv[]) {
 	int exit = 0;
 	while (!exit) {
 		for (int port = 0; port < meta->numPorts; port++) {
-			if ((dataRead = lofar_udp_io_read_DADA(rdrConfig, port, rawData[port], charsPerRead[port]) < charsPerRead[port]) ) {
+			if ((dataRead = _lofar_udp_io_read_DADA(rdrConfig, port, rawData[port], charsPerRead[port]) < charsPerRead[port]) ) {
 				fprintf(stderr, "WARNING: Recieved less data than expected on port %d (%ld vs %ld)\n", port, charsPerRead[port], dataRead);
 			}
 

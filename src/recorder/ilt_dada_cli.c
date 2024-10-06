@@ -73,23 +73,23 @@ int main(int argc, char  *argv[]) {
 				break;
 
 			case 'p':
-				cfg->portNum = strtoi(optarg, &endPtr);
+				cfg->portNum = internal_strtoi(optarg, &endPtr);
 				if (checkOpt(inputOpt, optarg, endPtr)) { flagged = 1; }
 				break;
 
 			case 'k':
-				cfg->io->outputDadaKeys[0] = strtoi(optarg, &endPtr);
+				cfg->io->outputDadaKeys[0] = internal_strtoi(optarg, &endPtr);
 				if (checkOpt(inputOpt, optarg, endPtr)) { flagged = 1; }
 				break;
 
 			case 'n':
-				cfg->packetsPerIteration = strtoi(optarg, &endPtr);
+				cfg->packetsPerIteration = internal_strtoi(optarg, &endPtr);
 				if (checkOpt(inputOpt, optarg, endPtr)) { flagged = 1; }
 				cfg->portBufferSize = 8 * cfg->packetsPerIteration * MAX_UDP_LEN;
 				break;
 
 			case 'm':
-				bufferMul = strtoi(optarg, &endPtr);
+				bufferMul = internal_strtoi(optarg, &endPtr);
 				if (checkOpt(inputOpt, optarg, endPtr)) { flagged = 1; }
 				break;
 
@@ -99,12 +99,12 @@ int main(int argc, char  *argv[]) {
 				break;
 
 			case 'r':
-				cfg->io->dadaConfig.num_readers = strtoi(optarg, &endPtr);
+				cfg->io->dadaConfig.num_readers = internal_strtoi(optarg, &endPtr);
 				if (checkOpt(inputOpt, optarg, endPtr)) { flagged = 1; }
 				break;
 
 			case 'l':
-				cfg->writesPerStatusLog = strtoi(optarg, &endPtr);
+				cfg->writesPerStatusLog = internal_strtoi(optarg, &endPtr);
 				if (checkOpt(inputOpt, optarg, endPtr)) { flagged = 1; }
 				break;
 
@@ -114,7 +114,7 @@ int main(int argc, char  *argv[]) {
 				break;
 
 			case 'e':
-				cfg->packetSize = strtoi(optarg, &endPtr);
+				cfg->packetSize = internal_strtoi(optarg, &endPtr);
 				if (checkOpt(inputOpt, optarg, endPtr)) { flagged = 1; }
 				cfg->forceStartup = 1;
 				packetSizeCopy = cfg->packetSize;
@@ -139,7 +139,7 @@ int main(int argc, char  *argv[]) {
 
 
 			case 'w':
-				minStartup = strtoi(optarg, &endPtr);
+				minStartup = internal_strtoi(optarg, &endPtr);
 				if (checkOpt('w', optarg, endPtr)) { flagged = 1; }
 				if (minStartup < 2) {
 					fprintf(stderr, "ERROR: Minimum start-up time must be greater than 2 seconds (%s/%d provided), exiting.\n", optarg, minStartup);
@@ -224,6 +224,8 @@ int main(int argc, char  *argv[]) {
 
 	printf("Observation finished, cleaning up.\n");
 	ilt_dada_cleanup(cfg);
+
+	return 0;
 }
 
 /**
@@ -233,7 +235,7 @@ int main(int argc, char  *argv[]) {
  *
  * @return     { description_of_the_return_value }
  */
-time_t unixTimeFromString(char *inputStr) {
+time_t unixTimeFromString(const char *inputStr) {
 	struct tm tmTime;
 	
 	if (strptime(inputStr, "%Y-%m-%dT%H:%M:%S", &tmTime) == NULL) {

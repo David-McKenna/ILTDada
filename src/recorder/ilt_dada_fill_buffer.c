@@ -196,7 +196,7 @@ int main(int argc, char *argv[]) {
 				return 1;
 			}
 
-			if (connect(config[port]->sockfd, serverInfo->ai_addr, sizeof(struct sockaddr))== -1) {
+			if (connect(config[port]->sockfd, serverInfo->ai_addr, sizeof(struct sockaddr)) == -1) {
 				fprintf(stderr, "ERROR: Unable to connect to remote host %s:%d (errno %d, %s)\n", hostIP, config[port]->portNum, errno, strerror(errno));
 				return 1;
 			}
@@ -211,7 +211,7 @@ int main(int argc, char *argv[]) {
 			readBytes = fread(&(config[port]->params->packetBuffer[0]), sizeof(char), config[port]->packetsPerIteration * PACKET_SIZE, inputFiles[port]);
 
 			if (packets == 0) {
-				writtenBytes = ipcio_write(config[port]->io->dadaWriter[0].ringbuffer, &(config[port]->params->packetBuffer[0]), readBytes);
+				writtenBytes = ipcio_write(config[port]->io->dadaWriter[0].hdu->data_block, &(config[port]->params->packetBuffer[0]), readBytes);
 			} else {
 				// sendmmg returns number of packets, multily by packet length to get bytes
 				writtenBytes = sendmmsg(config[port]->sockfd, config[port]->params->msgvec, config[port]->packetsPerIteration, 0);
