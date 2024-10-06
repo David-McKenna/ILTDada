@@ -41,7 +41,7 @@ include(FetchContent)
 
 FetchContent_Declare(udpPacketManager
                      GIT_REPOSITORY https://github.com/David-McKenna/udpPacketManager.git
-                     GIT_TAG stokesChannelisationFixes
+                     GIT_TAG origin/stokesChannelisationFixes
                      )
 FetchContent_MakeAvailable(udpPacketManager)
 
