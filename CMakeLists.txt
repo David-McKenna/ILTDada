@@ -66,7 +66,7 @@ configure_file(	"${PROJECT_SOURCE_DIR}/src/lib/ilt_dada.h.in"
 add_library(iltdada STATIC
             src/lib/ilt_dada.c)
 
-add_dependencies(iltdada lofudpman lofudpman_cli)
+add_dependencies(iltdada lofudpman)
 
 
 
@@ -91,13 +91,13 @@ target_link_libraries(iltdada PUBLIC OpenMP::OpenMP_CXX OpenMP::OpenMP_C)
 
 # Setup the CLIs
 add_executable(ilt_dada_cli src/recorder/ilt_dada_cli.c)
-target_link_libraries(ilt_dada_cli PUBLIC iltdada lofupdman_cli)
+target_link_libraries(ilt_dada_cli PUBLIC iltdada)
 
 add_executable(ilt_dada_dada2disk src/recorder/ilt_dada_dada2disk.c)
-target_link_libraries(ilt_dada_dada2disk PUBLIC iltdada lofudpman_cli)
+target_link_libraries(ilt_dada_dada2disk PUBLIC iltdada)
 
 add_executable(ilt_dada_fill_buffer src/recorder/ilt_dada_fill_buffer.c)
-target_link_libraries(ilt_dada_fill_buffer PUBLIC iltdada lofudpman_cli)
+target_link_libraries(ilt_dada_fill_buffer PUBLIC iltdada)
 
 
 include(CMakePackageConfigHelpers)
