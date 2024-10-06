@@ -28,7 +28,7 @@
 #include "multilog.h"
 
 // Include udpPacketManager general for consistent constants between the writer/consumer, easy access to the source bytes struct and the packet number functions
-#undef __GNU_SOURCE
+#undef _GNU_SOURCE
 #include "lofar_udp_general.h"
 #include "lofar_udp_io.h"
 #include "lofar_udp_time.h"

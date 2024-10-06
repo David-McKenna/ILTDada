@@ -1,6 +1,6 @@
 // sendmmsg needs the GNU Source define
 // This needs to be at the top or sendmmsg will not be found.
-#define _GNU_SOURCE
+#define _GNU_SOURCE 1
 
 // Standard includes
 #include <stdio.h>
@@ -9,8 +9,7 @@
 #include <string.h>
 #include <unistd.h>
 
-// UPM defines are needed
-#include "lofar_udp_general.h"
+#undef _GNU_SOURCE
 
 // PSRDADA includes
 #include "ilt_dada.h"
@@ -211,7 +210,7 @@ int main(int argc, char *argv[]) {
 			readBytes = fread(&(config[port]->params->packetBuffer[0]), sizeof(char), config[port]->packetsPerIteration * PACKET_SIZE, inputFiles[port]);
 
 			if (packets == 0) {
-				writtenBytes = ipcio_write(config[port]->io->dadaWriter[0].hdu->data_block, &(config[port]->params->packetBuffer[0]), readBytes);
+				writtenBytes = ipcio_write(config[port]->io->dadaWriter[0].hdu->data_block, (char *) &(config[port]->params->packetBuffer[0]), readBytes);
 			} else {
 				// sendmmg returns number of packets, multily by packet length to get bytes
 				writtenBytes = sendmmsg(config[port]->sockfd, config[port]->params->msgvec, config[port]->packetsPerIteration, 0);
@@ -238,8 +237,7 @@ int main(int argc, char *argv[]) {
 	for (int port = 0; port < numPorts; port++) {
 		printf("Freeing memory/closing file for port %d\n", port);
 
-		ilt_dada_operate_cleanup(config[port]);
-		ilt_dada_cleanup(config[port]);
+		ilt_dada_config_cleanup(config[port]);
 		fclose(inputFiles[port]);
 	}
 
