@@ -81,7 +81,7 @@ typedef enum {
 } config_states;
 
 typedef struct ilt_dada_operate_params {
-	char *packetBuffer;
+	int8_t *packetBuffer;
 	struct mmsghdr *msgvec;
 	struct iovec *iovecs;
 	struct timespec *timeout;

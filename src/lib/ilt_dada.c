@@ -517,7 +517,7 @@ int ilt_dada_setup(ilt_dada_config *config, int setup_io) {
 int ilt_dada_check_network(ilt_dada_config *config, int flags) {
 
 	// Read the first packet in the queue into the buffer (peek so it can be consumed later if we're late)
-	unsigned char buffer[MAX_UDP_LEN];
+	uint8_t buffer[MAX_UDP_LEN];
 	ssize_t recvreturn;
 	if ((recvreturn = recvfrom(config->sockfd, &buffer[0], MAX_UDP_LEN, MSG_PEEK | flags, NULL, NULL)) == -1) {
 		fprintf(stderr, "ERROR: Unable to peek at first packet (errno %d, %s).", errno, strerror(errno));
@@ -582,7 +582,7 @@ int ilt_dada_check_network(ilt_dada_config *config, int flags) {
  *
  * @return     0: success, -1: failure
  */
-int ilt_dada_check_header(ilt_dada_config *config, unsigned char* buffer) {
+int ilt_dada_check_header(ilt_dada_config *config, uint8_t* buffer) {
 	// Sanity check the components of the CEP packet header
 	lofar_source_bytes *source = (lofar_source_bytes*) &(buffer[1]);
 	if (config->checkInitParameters) {
@@ -595,13 +595,13 @@ int ilt_dada_check_header(ilt_dada_config *config, unsigned char* buffer) {
 
 		// Check the CEP header version
 		if (buffer[0] != UDPCURVER) {
-			fprintf(stderr, "ERROR: UDP version on port %d appears malformed (RSP Version is not 3, %d).\n", config->portNum, (unsigned char) buffer[0] < UDPCURVER);
+			fprintf(stderr, "ERROR: UDP version on port %d appears malformed (RSP Version is not 3, %d).\n", config->portNum, (uint8_t) buffer[0] < UDPCURVER);
 			return -1;
 		}
 
 		// Check the unix time isn't absurd
 		if (*((unsigned int *) &(buffer[8])) <  LFREPOCH) {
-			fprintf(stderr, "ERROR: on port %d appears malformed (data timestamp before 2008, %d).\n", config->portNum, *((unsigned int *) &(buffer[8])));
+			fprintf(stderr, "ERROR: on port %d appears malformed (data timestamp before 2008, %d).\n", config->portNum, *((uint32_t *) &(buffer[8])));
 			return -1;
 		}
 
@@ -609,19 +609,19 @@ int ilt_dada_check_header(ilt_dada_config *config, unsigned char* buffer) {
 		// Check that the RSP sequence is constrained
 		// TODO: This does not account for the variability in RSPMAXSEQ between the 200MHz/160MHz clocks
 		if (*((unsigned int *) &(buffer[12])) > RSPMAXSEQ) {
-			fprintf(stderr, "ERROR: RSP Sequence on port %d appears malformed (sequence higher than 200MHz clock maximum, %d).\n", config->portNum, *((unsigned int *) &(buffer[12])));
+			fprintf(stderr, "ERROR: RSP Sequence on port %d appears malformed (sequence higher than 200MHz clock maximum, %d).\n", config->portNum, *((uint32_t *) &(buffer[12])));
 			return -1;
 		}
 
 		// Check that the beam count is constrained
 		if (buffer[6] > UDPMAXBEAM) {
-			fprintf(stderr, "ERROR: Number of beams on port %d appears malformed (more than %d beamlets on a port, %d).\n", config->portNum, UDPMAXBEAM, (unsigned char) buffer[6]);
+			fprintf(stderr, "ERROR: Number of beams on port %d appears malformed (more than %d beamlets on a port, %d).\n", config->portNum, UDPMAXBEAM, (uint8_t) buffer[6]);
 			return -1;
 		}
 
 		// Check the number of time slices is UDPNTIMESLICE (16)
 		if (buffer[7] != UDPNTIMESLICE) {
-			fprintf(stderr, "ERROR: Number of time slices on port %d appears malformed (time slices are %d, not UDPNTIMESLICE).\n", config->portNum, (unsigned char) buffer[7]);
+			fprintf(stderr, "ERROR: Number of time slices on port %d appears malformed (time slices are %d, not UDPNTIMESLICE).\n", config->portNum, (uint8_t) buffer[7]);
 			return -1;
 		}
 
@@ -899,14 +899,14 @@ int ilt_dada_operate_loop(ilt_dada_config *config) {
 		// Check the packets for errors if requested
 		if (config->checkParameters == CHECK_ALL_PACKETS) {
 			for (int packetIdx = 0; packetIdx < (readPackets - 1); packetIdx++) {
-				if (ilt_dada_check_header(config, (unsigned char*) &config->params->packetBuffer[packetIdx * config->packetSize]) < 0) {
+				if (ilt_dada_check_header(config, (uint8_t*) &config->params->packetBuffer[packetIdx * config->packetSize]) < 0) {
 					fprintf(stderr, "ERROR: packet %d/%d port header data corrupted on port %d, exiting.\n\n", packetIdx, readPackets, config->portNum);
 					return -1;
 				}
 			}
 		} else if (config->checkParameters == CHECK_FIRST_LAST) {
-			int firstHeader = ilt_dada_check_header(config, (unsigned char*) &config->params->packetBuffer[0]);
-			int lastHeader = ilt_dada_check_header(config, (unsigned char*) &config->params->packetBuffer[finalPacketOffset]);
+			int firstHeader = ilt_dada_check_header(config, (uint8_t*) &config->params->packetBuffer[0]);
+			int lastHeader = ilt_dada_check_header(config, (uint8_t*) &config->params->packetBuffer[finalPacketOffset]);
 			if (firstHeader < 0 || lastHeader < 0) {
 				fprintf(stderr, "ERROR: port first or late header data corrupted on port %d (%d / %d), exiting.\n\n", config->portNum, firstHeader, lastHeader);
 				return -1;
@@ -974,7 +974,7 @@ int ilt_dada_operate_loop(ilt_dada_config *config) {
 int ilt_data_operate_prepare(ilt_dada_config *config) {
 
 	// Allocate memory for buffers
-	config->params->packetBuffer = (char*) calloc(config->packetsPerIteration, config->packetSize * sizeof(char));
+	config->params->packetBuffer = (int8_t*) calloc(config->packetsPerIteration, config->packetSize * sizeof(int8_t));
 	config->params->msgvec = (struct mmsghdr*) calloc(config->packetsPerIteration, sizeof(struct mmsghdr));
 	config->params->iovecs = (struct iovec*) calloc(config->packetsPerIteration, sizeof(struct iovec));
 
