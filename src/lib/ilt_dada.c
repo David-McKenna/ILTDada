@@ -845,7 +845,7 @@ int ilt_dada_operate_loop(ilt_dada_config *config) {
 			if (lastPacket >= (config->startPacket - config->packetsPerIteration)) {
 				// TODO: assumes no packets loss
 				writeBytes = readPackets * config->packetSize;
-				writtenBytes = ipcio_write(config->io->dadaWriter[0].hdu->data_block, &(config->params->packetBuffer[0]), writeBytes);
+				writtenBytes = lofar_udp_io_write(config->io, 0, config->params->packetBuffer, writeBytes);
 
 				if (writtenBytes < 0) {
 					fprintf(stderr, "ERROR Port %d: Failed to write data to ringbuffer %d, exiting.\n", config->portNum, config->io->outputDadaKeys[0]);
