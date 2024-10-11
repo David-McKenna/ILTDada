@@ -21,10 +21,10 @@ void helpMessages() {
 
 	printf("-h				: Display this message\n");
 	printf("-k (int)		: Target DADA buffer (default, output to ringbuffer at %d)\n", DEF_PORT);
-	printf("-u (int,int)	: Target port and offset between ports (default, e.g., %d,1)\n", DEF_PORT);
+	printf("-u (int,int)	: Target port and offset between ports (default, e.g., %d,1)\n\t\tIf this option is set to 0, data will be written directly to the ringbuffer set by '-k'\n", DEF_PORT);
 	printf("-H (str)		: Target machine IP (e.g., localhost, my.server.com)\n");
 	printf("-i (str)		: Input raw data file\n");
-	printf("-p (int)		: Packets loaded and sent per operation (default: 1024)\n\t\tIf this option is set to 0, data will be written directly to the ringbuffer set by '-k'\n");
+	printf("-p (int)		: Packets loaded and sent per operation (default: 1024)\n");
 	printf("-n (int)		: Number of target ports (default: 1)\n");
 	printf("-t (int)		: Total number of pakcets to loadand send (default: entire input)\n");
 	printf("-w (int)		: Time in milliseconds to wait between starting operations (default: 1) (upper limit on throughput, may not be reached if disks / CPU are too slow)\n\n");
@@ -32,9 +32,9 @@ void helpMessages() {
 
 int main(int argc, char *argv[]) {
 
-	int inputOpt, packets = 0, waitTime = 1;
+	int inputOpt, packets = 1, waitTime = 1;
 	char inputFile[DEF_STR_LEN] = "", workingName[DEF_STR_LEN] = "", hostIP[DEF_STR_LEN] = "127.0.0.1";
-	long totalPackets = LONG_MAX, packetCount = 0, writtenBytes, readBytes;
+	long totalPackets = LONG_MAX, packetCount = 0, writtenBytes;
 	int numPorts = 1;
 	int offset = 10, fullReads = 1, portOffset = 1;
 
@@ -53,8 +53,10 @@ int main(int argc, char *argv[]) {
 		switch(inputOpt) {
 
 			case 'u':
-				packets = 1;
 				sscanf(optarg, "%d,%d", &(config[0]->portNum), &portOffset);
+				if (config[0]->portNum == 0) {
+					packets = 0;
+				}
 				break;
 
 			case 'H':
@@ -110,7 +112,7 @@ int main(int argc, char *argv[]) {
 
 
 	config[0]->portBufferSize = 4 * PACKET_SIZE * config[0]->packetsPerIteration;
-
+	config[0]->io->numOutputs = numPorts;
 	for (int port = 0; port < numPorts; port++) {
 		if (port != 0) {
 			config[port] = ilt_dada_init();
@@ -121,20 +123,19 @@ int main(int argc, char *argv[]) {
 		config[port]->portBufferSize = config[0]->portBufferSize;
 		config[port]->recvflags = config[0]->recvflags;
 
-		config[port]->io->outputDadaKeys[0] = config[0]->io->outputDadaKeys[0] + offset * port;
 
 		if (packets == 0) {
-			config[port]->io->readerType = DADA_ACTIVE;
-			config[port]->io->dadaConfig.nbufs = 32;
-			config[port]->io->writeBufSize[port] = 4 * PACKET_SIZE * config[0]->packetsPerIteration;
-
-			// Initialise the ringbuffer, exit on failure
-			if (lofar_udp_io_write_setup(config[port]->io, 0) < 0) {
-				return 1;
-			}
+			config[0]->io->readerType = DADA_ACTIVE;
+			config[0]->io->dadaConfig.nbufs = 32;
+			config[0]->io->writeBufSize[port] = 4 * PACKET_SIZE * config[0]->packetsPerIteration;
+			config[0]->io->outputDadaKeys[port] = config[0]->io->outputDadaKeys[0] + offset * port;
 		}
-
-		
+	}
+	if (packets == 0) {
+		// Initialise the ringbuffer, exit on failure
+		if (lofar_udp_io_write_setup(config[0]->io, 0) < 0) {
+			return 1;
+		}
 	}
 
 	struct addrinfo *serverInfo;
@@ -148,7 +149,7 @@ int main(int argc, char *argv[]) {
 			}
 		}
 
-		struct addrinfo addressInfo = {
+		const struct addrinfo addressInfo = {
 			.ai_family = AF_UNSPEC,
 			.ai_socktype = SOCK_DGRAM,
 			.ai_flags = IPPROTO_UDP
@@ -183,7 +184,7 @@ int main(int argc, char *argv[]) {
 		
 		if (packets == 0) {
 			printf("Allocating %ld MB for %d %d byte packets on port %d\n", (long) config[0]->packetsPerIteration * PACKET_SIZE >> 20, config[0]->packetsPerIteration, PACKET_SIZE, port);
-			config[port]->params->packetBuffer = calloc(config[0]->packetsPerIteration * PACKET_SIZE, sizeof(char));
+			config[port]->params->packetBuffer = calloc(config[0]->packetsPerIteration * PACKET_SIZE, sizeof(int8_t));
 
 			if (config[port]->params->packetBuffer == NULL) {
 				fprintf(stderr, "ERROR: Failed to allocate data on port %d, exiting.\n", port);
@@ -207,24 +208,33 @@ int main(int argc, char *argv[]) {
 
 	while (packetCount < totalPackets && fullReads) {
 		for (int port = 0; port < numPorts; port++) {
-			readBytes = fread(&(config[port]->params->packetBuffer[0]), sizeof(char), config[port]->packetsPerIteration * PACKET_SIZE, inputFiles[port]);
+			const size_t readBytes = fread(&(config[port]->params->packetBuffer[0]), sizeof(char),
+			                       config[port]->packetsPerIteration * PACKET_SIZE, inputFiles[port]);
 
 			if (packets == 0) {
-				writtenBytes = ipcio_write(config[port]->io->dadaWriter[0].hdu->data_block, (char *) &(config[port]->params->packetBuffer[0]), readBytes);
+				writtenBytes = lofar_udp_io_write(config[0]->io, port, (int8_t*) config[port]->params->packetBuffer, readBytes);
 			} else {
-				// sendmmg returns number of packets, multily by packet length to get bytes
 				writtenBytes = sendmmsg(config[port]->sockfd, config[port]->params->msgvec, config[port]->packetsPerIteration, 0);
+				// sendmmg returns number of packets, multiply by packet length to get bytes
 				writtenBytes *= PACKET_SIZE;
 			}
 
-			if (readBytes != config[port]->packetsPerIteration * PACKET_SIZE) {
+			if (writtenBytes < 0) {
+				fprintf(stderr, "ERROR: Failed to write data, exiting.\n");
+				break;
+			}
+
+			if (readBytes != (size_t) (config[port]->packetsPerIteration * PACKET_SIZE)) {
 				fullReads = 0;
-				printf("Read less data than expected (%ld, %ld), finishing up.\n", readBytes, (long) config[port]->packetsPerIteration * PACKET_SIZE);
+				printf("Read less data than expected (%ld, %ld), likely reached EOF, finishing up.\n", readBytes, (long) config[port]->packetsPerIteration * PACKET_SIZE);
 			}
 
 
-			if (writtenBytes != readBytes) {
+			if (writtenBytes != (long) readBytes) {
 				fprintf(stderr, "WARNING Port %d: Tried to send/write %ld bytes to buffer but only wrote %ld (errno: %d, %s).\n", port, readBytes, writtenBytes, errno, strerror(errno));
+				if (packets && writtenBytes == PACKET_SIZE) {
+					fprintf(stderr, "Is there no listener on the other side of your UDP port?\n");
+				}
 			} else {
 				printf("Port %d: sent/wrote %d packets to buffer.\n", port, config[port]->packetsPerIteration);
 			}

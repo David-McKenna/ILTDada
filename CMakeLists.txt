@@ -93,9 +93,6 @@ target_link_libraries(iltdada PUBLIC OpenMP::OpenMP_CXX OpenMP::OpenMP_C)
 add_executable(ilt_dada_cli src/recorder/ilt_dada_cli.c)
 target_link_libraries(ilt_dada_cli PUBLIC iltdada)
 
-add_executable(ilt_dada_dada2disk src/recorder/ilt_dada_dada2disk.c)
-target_link_libraries(ilt_dada_dada2disk PUBLIC iltdada)
-
 add_executable(ilt_dada_fill_buffer src/recorder/ilt_dada_fill_buffer.c)
 target_link_libraries(ilt_dada_fill_buffer PUBLIC iltdada)
 
@@ -109,7 +106,7 @@ write_basic_package_version_file(
 
 
 # Install everything except for the debug fill_buffer CLI
-install(TARGETS iltdada ilt_dada_cli ilt_dada_dada2disk
+install(TARGETS iltdada ilt_dada_cli ilt_dada_fill_buffer
 		EXPORT iltdada
 		LIBRARY DESTINATION lib
 		RUNTIME DESTINATION bin
